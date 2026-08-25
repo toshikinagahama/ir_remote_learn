@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>IR Remote - BLE Controller</title>
+<style>
+  :root {
+    --bg: #12141c;
+    --panel: #1c1f2b;
+    --panel-border: rgba(255,255,255,0.08);
+    --btn: #262a3a;
+    --btn-active: #343951;
+    --btn-empty: #1a1c26;
+    --accent: #5b8cff;
+    --accent-dim: #2f3f66;
+    --danger: #ef4444;
+    --ok: #22c55e;
+    --text: #f1f3f9;
+    --text-muted: #8b90a5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+  .dot.on { background: var(--ok); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    color: var(--text);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-primary {
+    background: var(--accent);
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    width: 100%;
+  }
+  .btn-secondary {
+    background: var(--btn);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .btn-danger {
+    background: var(--danger);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+
+  .tab-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .tab-btn {
+    background: var(--btn-empty);
+    color: var(--text-muted);
+    padding: 10px 4px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .tab-btn.active { background: var(--accent); color: var(--text); }
+
+  .edit-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .edit-toggle span { font-size: 14px; color: var(--text-muted); }
+  .switch {
+    position: relative; width: 44px; height: 24px;
+    background: var(--btn); border-radius: 999px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .switch.on { background: var(--accent); }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    transition: left 0.15s;
+  }
+  .switch.on::after { left: 22px; }
+
+  .remote-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .remote-btn {
+    background: var(--btn);
+    border-radius: 14px;
+    padding: 20px 10px;
+    min-height: 84px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+    position: relative;
+    transition: background 0.1s, transform 0.05s;
+  }
+  .remote-btn:active { transform: scale(0.96); background: var(--btn-active); }
+  .remote-btn.empty { background: var(--btn-empty); color: var(--text-muted); }
+  .remote-btn.edit-mode { outline: 2px dashed var(--accent-dim); }
+  .remote-btn .slot-num {
+    position: absolute; top: 6px; left: 8px;
+    font-size: 10px; color: var(--text-muted);
+  }
+  .remote-btn .label {
+    font-size: 15px; font-weight: 600; line-height: 1.3;
+    word-break: break-word;
+  }
+  .remote-btn .proto {
+    font-size: 10px; color: var(--text-muted);
+  }
+  .remote-btn.learning {
+    outline: 2px solid var(--accent);
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(91,140,255,0.5); }
+    50% { box-shadow: 0 0 0 8px rgba(91,140,255,0); }
+  }
+
+  /* エアコンパネル */
+  .ac-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; font-size: 14px; font-weight: 600;
+  }
+  select {
+    width: 100%;
+    background: var(--btn);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-family: inherit;
+  }
+  select:disabled { opacity: 0.4; }
+  .ac-temp-row {
+    display: flex; align-items: center; justify-content: center; gap: 20px;
+    margin-bottom: 14px;
+  }
+  .ac-temp-row button {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--btn); font-size: 20px; font-weight: 700;
+  }
+  .ac-temp-value { font-size: 28px; font-weight: 700; min-width: 72px; text-align: center; }
+  .ac-mode-row {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    margin-bottom: 12px;
+  }
+  .ac-mode-btn {
+    background: var(--btn);
+    padding: 10px 4px;
+    border-radius: 10px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .ac-mode-btn.active { background: var(--accent); font-weight: 700; }
+  .ac-sub-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .ac-sub-row select { margin-bottom: 0; flex: 1; }
+  .ac-swing-toggle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text-muted); white-space: nowrap;
+  }
+  .ac-disabled-hint { font-size: 12px; color: var(--text-muted); text-align: center; padding: 8px 0; }
+  .ac-power-status {
+    font-size: 11px; font-weight: 500; margin-left: 6px;
+    color: var(--text-muted);
+  }
+  .ac-power-status.on { color: var(--ok); }
+  .ac-stop-btn { width: 100%; margin-top: 4px; }
+
+  .log-panel { margin-top: 4px; }
+  .log-header {
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; font-size: 13px; color: var(--text-muted);
+  }
+  .log-box {
+    display: none;
+    margin-top: 10px;
+    max-height: 160px;
+    overflow-y: auto;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: #0c0e14;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .log-box.show { display: block; }
+  .log-line { padding: 1px 0; }
+
+  /* モーダル */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 10;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px 16px 0 0;
+    padding: 20px;
+    width: 100%;
+    max-width: 480px;
+  }
+  .modal h2 { font-size: 16px; margin: 0 0 14px; }
+  .modal input[type=text] {
+    width: 100%;
+    background: var(--btn);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+  .modal-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .modal-row button { flex: 1; }
+  .modal-status { font-size: 13px; color: var(--text-muted); min-height: 18px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>IR Remote</h1>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">未接続</span>
+    </div>
+  </header>
+
+  <div class="panel">
+    <button class="btn-primary" id="btnConnect">BLE接続</button>
+  </div>
+
+  <div class="panel">
+    <div class="tab-bar" id="tabBar">
+      <button class="tab-btn active" data-tab="ac">エアコン</button>
+      <button class="tab-btn" data-tab="tv">テレビ</button>
+      <button class="tab-btn" data-tab="light">照明</button>
+      <button class="tab-btn" data-tab="other">その他</button>
+    </div>
+
+    <div id="tabContentAc">
+      <div class="ac-header">
+        <span>エアコン（汎用） <span id="acPowerStatus" class="ac-power-status">停止中</span></span>
+        <div class="switch" id="acPowerSwitch"></div>
+      </div>
+      <select id="acBrandSelect" disabled>
+        <option value="">未接続</option>
+      </select>
+      <div class="ac-temp-row">
+        <button class="btn-secondary" id="acTempDown">−</button>
+        <span class="ac-temp-value" id="acTempValue">25℃</span>
+        <button class="btn-secondary" id="acTempUp">＋</button>
+      </div>
+      <div class="ac-mode-row" id="acModeRow"></div>
+      <button class="btn-danger ac-stop-btn" id="acStopBtn">停止</button>
+      <div class="ac-sub-row">
+        <select id="acFanSelect">
+          <option value="0">送風: 自動</option>
+          <option value="1">送風: 弱め</option>
+          <option value="2">送風: 弱</option>
+          <option value="3">送風: 中</option>
+          <option value="4">送風: 強</option>
+          <option value="5">送風: 最大</option>
+          <option value="6">送風: 中強</option>
+        </select>
+        <div class="ac-swing-toggle">
+          <span>スイング</span>
+          <div class="switch" id="acSwingSwitch"></div>
+        </div>
+      </div>
+      <div class="ac-disabled-hint" id="acHint">接続後、ブランドを選択してください</div>
+    </div>
+
+    <div id="tabContentSlots" style="display:none">
+      <div class="edit-toggle">
+        <span>編集モード（タップで学習/名前変更）</span>
+        <div class="switch" id="editSwitch"></div>
+      </div>
+      <div class="remote-grid" id="remoteGrid"></div>
+    </div>
+  </div>
+
+  <div class="panel log-panel">
+    <div class="log-header" id="logHeader">
+      <span>通信ログ ▾</span>
+      <span id="logClear">消去</span>
+    </div>
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalTitle">スロット編集</h2>
+    <div class="modal-status" id="modalStatus"></div>
+    <input type="text" id="modalLabelInput" placeholder="ボタン名（例: エアコン ON）" maxlength="32">
+    <select id="modalCategorySelect">
+      <option value="1">テレビ</option>
+      <option value="2">照明</option>
+      <option value="0">その他</option>
+    </select>
+    <div class="modal-row">
+      <button class="btn-secondary" id="btnSaveLabel">名前とタブを保存</button>
+    </div>
+    <div class="modal-row">
+      <button class="btn-primary" id="btnLearn">このボタンに学習させる</button>
+    </div>
+    <div class="modal-row">
+      <button class="btn-danger" id="btnDeleteSlot">このボタンを削除</button>
+      <button class="btn-secondary" id="btnCloseModal">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SERVICE_UUID = 'd9a1c1a0-1b0e-4f7e-9a2b-6f9a2f6e6c11';
+  const CHARACTERISTIC_UUID = 'd9a1c1a1-1b0e-4f7e-9a2b-6f9a2f6e6c11';
+  const NUM_SLOTS = 16;
+
+  // ファームウェア側 SlotCategory と対応
+  const CATEGORY = { OTHER: 0, TV: 1, LIGHT: 2 };
+  const CATEGORY_LABEL = { 0: 'その他', 1: 'テレビ', 2: '照明' };
+  const TAB_TO_CATEGORY = { tv: CATEGORY.TV, light: CATEGORY.LIGHT, other: CATEGORY.OTHER };
+  let activeTab = 'ac';
+
+  const BLECmd = {
+    GET_DEVICE_INFO: [0x00, 0x01],
+    GET_SLOTS:       [0x01, 0x00],
+    SET_LABEL:       [0x01, 0x01],
+    DELETE_SLOT:     [0x01, 0x02],
+    SET_CATEGORY:    [0x01, 0x03],
+    LEARN_START:     [0x02, 0x00],
+    LEARN_CANCEL:    [0x02, 0x01],
+    SEND_SLOT:       [0x03, 0x00],
+    GET_AC_BRANDS:   [0x04, 0x00],
+    SET_AC_BRAND:    [0x04, 0x01],
+    GET_AC_STATE:    [0x04, 0x02],
+    SET_AC_STATE:    [0x04, 0x03],
+  };
+
+  const AC_MODES = [
+    { v: 0, label: '自動' },
+    { v: 1, label: '冷房' },
+    { v: 2, label: '暖房' },
+    { v: 3, label: '除湿' },
+    { v: 4, label: '送風' },
+  ];
+
+  const acState = {
+    power: false, protocolId: 0, protocolName: '',
+    mode: 0, temp: 25, fan: 0, swing: false,
+  };
+
+  let bleDevice = null;
+  let bleServer = null;
+  let mainChar = null;
+  let editMode = false;
+  let learningSlot = null;
+  let currentModalSlot = null;
+
+  const slots = Array.from({ length: NUM_SLOTS }, (_, i) => ({
+    n: i, valid: false, label: '', protocol: '', bits: 0, category: CATEGORY.OTHER
+  }));
+
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const btnConnect = document.getElementById('btnConnect');
+  const editSwitch = document.getElementById('editSwitch');
+  const remoteGrid = document.getElementById('remoteGrid');
+  const logBox = document.getElementById('logBox');
+  const logHeader = document.getElementById('logHeader');
+
+  const modalOverlay = document.getElementById('modalOverlay');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalStatus = document.getElementById('modalStatus');
+  const modalLabelInput = document.getElementById('modalLabelInput');
+  const modalCategorySelect = document.getElementById('modalCategorySelect');
+
+  const tabBar = document.getElementById('tabBar');
+  const tabContentAc = document.getElementById('tabContentAc');
+  const tabContentSlots = document.getElementById('tabContentSlots');
+
+  const acPowerSwitch = document.getElementById('acPowerSwitch');
+  const acPowerStatus = document.getElementById('acPowerStatus');
+  const acStopBtn = document.getElementById('acStopBtn');
+  const acBrandSelect = document.getElementById('acBrandSelect');
+  const acTempValue = document.getElementById('acTempValue');
+  const acTempDown = document.getElementById('acTempDown');
+  const acTempUp = document.getElementById('acTempUp');
+  const acModeRow = document.getElementById('acModeRow');
+  const acFanSelect = document.getElementById('acFanSelect');
+  const acSwingSwitch = document.getElementById('acSwingSwitch');
+  const acHint = document.getElementById('acHint');
+
+  AC_MODES.forEach((m) => {
+    const el = document.createElement('div');
+    el.className = 'ac-mode-btn';
+    el.textContent = m.label;
+    el.dataset.mode = m.v;
+    el.addEventListener('click', () => {
+      if (!acState.protocolId) return;
+      acState.mode = m.v;
+      renderAc();
+      sendAcState();
+    });
+    acModeRow.appendChild(el);
+  });
+
+  function renderAc() {
+    const hasBrand = !!acState.protocolId;
+    acHint.style.display = hasBrand ? 'none' : 'block';
+    [acPowerSwitch, acTempDown, acTempUp, acFanSelect, acSwingSwitch].forEach((el) => {
+      el.style.pointerEvents = hasBrand ? 'auto' : 'none';
+      el.style.opacity = hasBrand ? '1' : '0.4';
+    });
+    acPowerSwitch.classList.toggle('on', acState.power);
+    acPowerStatus.classList.toggle('on', acState.power);
+    acPowerStatus.textContent = acState.power ? '運転中' : '停止中';
+    acStopBtn.disabled = !hasBrand || !acState.power;
+    acSwingSwitch.classList.toggle('on', acState.swing);
+    acTempValue.textContent = acState.temp + '℃';
+    acFanSelect.value = String(acState.fan);
+    Array.from(acModeRow.children).forEach((el) => {
+      el.classList.toggle('active', Number(el.dataset.mode) === acState.mode);
+    });
+  }
+
+  function sendAcState() {
+    const payload = new Uint8Array([
+      ...BLECmd.SET_AC_STATE,
+      acState.power ? 1 : 0,
+      acState.mode,
+      acState.temp,
+      acState.fan,
+      acState.swing ? 1 : 0,
+    ]);
+    writeRaw(payload);
+  }
+
+  acPowerSwitch.addEventListener('click', () => {
+    if (!acState.protocolId) return;
+    acState.power = !acState.power;
+    renderAc();
+    sendAcState();
+  });
+
+  acStopBtn.addEventListener('click', () => {
+    if (!acState.protocolId) return;
+    acState.power = false;
+    renderAc();
+    sendAcState();
+  });
+
+  acSwingSwitch.addEventListener('click', () => {
+    if (!acState.protocolId) return;
+    acState.swing = !acState.swing;
+    renderAc();
+    sendAcState();
+  });
+
+  acTempDown.addEventListener('click', () => {
+    if (!acState.protocolId) return;
+    acState.temp = Math.max(16, acState.temp - 1);
+    renderAc();
+    sendAcState();
+  });
+
+  acTempUp.addEventListener('click', () => {
+    if (!acState.protocolId) return;
+    acState.temp = Math.min(30, acState.temp + 1);
+    renderAc();
+    sendAcState();
+  });
+
+  acFanSelect.addEventListener('change', () => {
+    if (!acState.protocolId) return;
+    acState.fan = Number(acFanSelect.value);
+    sendAcState();
+  });
+
+  acBrandSelect.addEventListener('change', () => {
+    const id = Number(acBrandSelect.value);
+    if (!id) return;
+    const payload = new Uint8Array([...BLECmd.SET_AC_BRAND, id & 0xff, (id >> 8) & 0xff]);
+    writeRaw(payload);
+  });
+
+  function log(msg) {
+    const now = new Date();
+    const t = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.textContent = `[${t}] ${msg}`;
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  logHeader.addEventListener('click', (e) => {
+    if (e.target.id === 'logClear') { logBox.innerHTML = ''; return; }
+    logBox.classList.toggle('show');
+  });
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    Array.from(tabBar.children).forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    tabContentAc.style.display = tab === 'ac' ? 'block' : 'none';
+    tabContentSlots.style.display = tab === 'ac' ? 'none' : 'block';
+    if (tab !== 'ac') renderGrid();
+  }
+
+  Array.from(tabBar.children).forEach((btn) => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  function renderGrid() {
+    remoteGrid.innerHTML = '';
+    const targetCategory = TAB_TO_CATEGORY[activeTab];
+    if (targetCategory === undefined) return;
+    slots.filter((s) => s.category === targetCategory).forEach((s) => {
+      const el = document.createElement('div');
+      el.className = 'remote-btn' + (s.valid ? '' : ' empty') + (editMode ? ' edit-mode' : '') + (learningSlot === s.n ? ' learning' : '');
+      el.innerHTML = `
+        <span class="slot-num">${s.n}</span>
+        <span class="label">${escapeHtml(s.label || (s.valid ? '(無名)' : '未学習'))}</span>
+        ${s.valid ? `<span class="proto">${escapeHtml(s.protocol)}</span>` : ''}
+      `;
+      el.addEventListener('click', () => onSlotTap(s.n));
+      remoteGrid.appendChild(el);
+    });
+  }
+
+  function onSlotTap(n) {
+    if (!mainChar) return;
+    if (editMode) {
+      openModal(n);
+    } else {
+      const s = slots[n];
+      if (!s.valid) { log(`スロット${n}は未学習です`); return; }
+      sendCommand([...BLECmd.SEND_SLOT, n]);
+    }
+  }
+
+  editSwitch.addEventListener('click', () => {
+    editMode = !editMode;
+    editSwitch.classList.toggle('on', editMode);
+    renderGrid();
+  });
+
+  // --- モーダル ---
+  function openModal(n) {
+    currentModalSlot = n;
+    const s = slots[n];
+    modalTitle.textContent = `スロット ${n} を編集`;
+    modalLabelInput.value = s.label || '';
+    modalCategorySelect.value = String(s.category);
+    modalStatus.textContent = s.valid ? `登録済み: ${s.protocol} (${s.bits}bit)` : '未学習';
+    modalOverlay.classList.add('show');
+  }
+
+  function closeModal() {
+    if (learningSlot !== null) {
+      sendCommand(BLECmd.LEARN_CANCEL);
+      learningSlot = null;
+      renderGrid();
+    }
+    modalOverlay.classList.remove('show');
+    currentModalSlot = null;
+  }
+
+  document.getElementById('btnCloseModal').addEventListener('click', closeModal);
+
+  // BLEデフォルトMTU(23B)の書き込み上限に収まるようUTF-8バイト単位で切り詰める
+  // (文字境界を壊さないよう1文字ずつ削って再エンコードする)
+  function truncateUtf8(str, maxBytes) {
+    const encoder = new TextEncoder();
+    while (encoder.encode(str).length > maxBytes) {
+      str = str.slice(0, -1);
+    }
+    return str;
+  }
+
+  document.getElementById('btnSaveLabel').addEventListener('click', () => {
+    if (currentModalSlot === null) return;
+    let label = modalLabelInput.value.replace(/,/g, ' ').trim();
+    label = truncateUtf8(label, 17);
+    const encoder = new TextEncoder();
+    const labelBytes = encoder.encode(label);
+    const payload = new Uint8Array(2 + 1 + labelBytes.length);
+    payload.set(BLECmd.SET_LABEL, 0);
+    payload[2] = currentModalSlot;
+    payload.set(labelBytes, 3);
+    writeRaw(payload).then(() => {
+      const category = Number(modalCategorySelect.value);
+      if (category !== slots[currentModalSlot].category) {
+        return writeRaw(new Uint8Array([...BLECmd.SET_CATEGORY, currentModalSlot, category]));
+      }
+    });
+    modalStatus.textContent = '保存しました';
+  });
+
+  document.getElementById('btnLearn').addEventListener('click', () => {
+    if (currentModalSlot === null) return;
+    learningSlot = currentModalSlot;
+    modalStatus.textContent = 'リモコンのボタンを押してください... (15秒以内)';
+    renderGrid();
+    sendCommand([...BLECmd.LEARN_START, currentModalSlot]);
+  });
+
+  document.getElementById('btnDeleteSlot').addEventListener('click', () => {
+    if (currentModalSlot === null) return;
+    sendCommand([...BLECmd.DELETE_SLOT, currentModalSlot]);
+    closeModal();
+  });
+
+  // --- BLE 接続 ---
+  async function connectBLE() {
+    try {
+      log('BLEデバイスを検索中...');
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'IR-Remote' }],
+        optionalServices: [SERVICE_UUID]
+      });
+      bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+      log(`"${bleDevice.name}" に接続中...`);
+      bleServer = await bleDevice.gatt.connect();
+
+      const service = await bleServer.getPrimaryService(SERVICE_UUID);
+      mainChar = await service.getCharacteristic(CHARACTERISTIC_UUID);
+      await mainChar.startNotifications();
+      mainChar.addEventListener('characteristicvaluechanged', handleNotification);
+
+      setUIConnected(true);
+      acBrandSelect.disabled = false;
+      log('接続完了');
+
+      // スロット一覧・エアコン状態はStateIdle::onEnter()側から接続直後に自動push済みだが、
+      // 念のため明示的にも要求しておく(再接続時の取りこぼし対策)
+      await sendCommand(BLECmd.GET_SLOTS);
+      await sendCommand(BLECmd.GET_AC_STATE);
+      await sendCommand(BLECmd.GET_AC_BRANDS);
+    } catch (e) {
+      log('接続エラー: ' + e.message);
+      setUIConnected(false);
+    }
+  }
+
+  function disconnectBLE() {
+    if (bleDevice && bleDevice.gatt.connected) {
+      bleDevice.gatt.disconnect();
+    }
+  }
+
+  function onDisconnected() {
+    log('切断されました');
+    mainChar = null;
+    acBrandSelect.disabled = true;
+    setUIConnected(false);
+  }
+
+  function setUIConnected(connected) {
+    dot.classList.toggle('on', connected);
+    statusText.textContent = connected ? '接続中' : '未接続';
+    btnConnect.textContent = connected ? '切断' : 'BLE接続';
+  }
+
+  btnConnect.addEventListener('click', () => {
+    if (mainChar) {
+      disconnectBLE();
+    } else {
+      connectBLE();
+    }
+  });
+
+  async function sendCommand(bytesArray) {
+    await writeRaw(new Uint8Array(bytesArray));
+  }
+
+  async function writeRaw(bytes) {
+    if (!mainChar) return;
+    try {
+      await mainChar.writeValue(bytes);
+      log('TX -> [' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ') + ']');
+    } catch (e) {
+      log('送信エラー: ' + e.message);
+    }
+  }
+
+  function handleNotification(event) {
+    const decoder = new TextDecoder('utf-8');
+    const text = decoder.decode(event.target.value);
+    log('RX <- ' + text);
+
+    const parts = text.split(',');
+    const key = parts[0];
+
+    if (key === 'slot') {
+      const n = parseInt(parts[1], 10);
+      if (Number.isInteger(n) && n >= 0 && n < NUM_SLOTS) {
+        slots[n].valid = parts[2] === '1';
+        slots[n].label = parts[3] || '';
+        slots[n].protocol = parts[4] || '';
+        slots[n].bits = parseInt(parts[5], 10) || 0;
+        if (parts[6] !== undefined) slots[n].category = parseInt(parts[6], 10) || 0;
+        if (learningSlot === n) {
+          learningSlot = null;
+        }
+        renderGrid();
+        if (currentModalSlot === n) {
+          modalStatus.textContent = slots[n].valid
+            ? `登録済み: ${slots[n].protocol} (${slots[n].bits}bit)`
+            : '未学習';
+        }
+      }
+    } else if (key === 'learn') {
+      const sub = parts[1];
+      if (sub === 'start') {
+        // 既にUI側でlearning状態にしているので特に何もしない
+      } else if (sub === 'unknown') {
+        modalStatus.textContent = '未知のプロトコルです。認識できませんでした。';
+        learningSlot = null;
+        renderGrid();
+      } else if (sub === 'timeout') {
+        modalStatus.textContent = 'タイムアウトしました。信号を受信できませんでした。';
+        learningSlot = null;
+        renderGrid();
+      } else if (sub === 'cancelled') {
+        learningSlot = null;
+        renderGrid();
+      }
+    } else if (key === 'send') {
+      const n = parseInt(parts[1], 10);
+      const ok = parts[2] === '1';
+      log(ok ? `スロット${n}送信完了` : `スロット${n}送信失敗`);
+    } else if (key === 'device_info') {
+      log('デバイス情報: ' + parts.slice(1).join(','));
+    } else if (key === 'acbrand') {
+      const id = parts[1];
+      const name = parts[2] || '';
+      if (!Array.from(acBrandSelect.options).some((o) => o.value === id)) {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = name;
+        acBrandSelect.appendChild(opt);
+      }
+      if (Number(id) === acState.protocolId) {
+        acBrandSelect.value = id;
+      }
+    } else if (key === 'ac_state') {
+      acState.power = parts[1] === '1';
+      acState.protocolId = parseInt(parts[2], 10) || 0;
+      acState.protocolName = parts[3] || '';
+      acState.mode = parseInt(parts[4], 10) || 0;
+      acState.temp = parseInt(parts[5], 10) || 25;
+      acState.fan = parseInt(parts[6], 10) || 0;
+      acState.swing = parts[7] === '1';
+      if (acState.protocolId && Array.from(acBrandSelect.options).some((o) => o.value === String(acState.protocolId))) {
+        acBrandSelect.value = String(acState.protocolId);
+      }
+      renderAc();
+    }
+  }
+
+  if (!navigator.bluetooth) {
+    log('このブラウザはWeb Bluetoothに対応していません（Chrome推奨）');
+    btnConnect.disabled = true;
+  }
+
+  renderGrid();
+  renderAc();
+</script>
+</body>
+</html>
