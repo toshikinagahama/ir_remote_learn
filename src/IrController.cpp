@@ -1,4 +1,5 @@
 #include "IrController.h"
+#include <ir_Panasonic.h>
 
 IrController irController;
 
@@ -181,7 +182,43 @@ void IrController::acSetBrand(decode_type_t protocol) {
   acState_.degrees = degrees;
   acState_.fanspeed = fan;
   acState_.swingv = swingv;
+
+  Serial.printf("acSetBrand: called with protocol=%d (%s)\n", (int)protocol, typeToString(protocol).c_str());
+
+  // 同じプロトコルで学習済みの実機コードがあれば、そこから型番(model)を推定して引き継ぐ。
+  // PANASONIC_AC等は型番(CKP/DKE/JKE/NKE/RKR/LKE等)ごとに符号化が異なり、
+  // model未指定(-1=デフォルト)のまま汎用送信すると実機が反応しない/一部しか反応しないことがある
+  if (protocol == decode_type_t::PANASONIC_AC) {
+    bool found = false;
+    for (uint8_t n = 0; n < kMaxSlots; n++) {
+      Serial.printf("  slot%u: valid=%d isState=%d protocol=%d\n",
+                    n, slots[n].valid, slots[n].isState, (int)slots[n].protocol);
+      if (slots[n].valid && slots[n].isState && slots[n].protocol == protocol) {
+        IRPanasonicAc detector(0);  // 送信はしない、デコード専用に使う
+        detector.setRaw(slots[n].state);
+        acState_.model = (int16_t)detector.getModel();
+        Serial.printf("acSetBrand: PANASONIC_AC model %d をスロット%uの学習データから引き継ぎ\n",
+                      acState_.model, n);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      Serial.println("acSetBrand: 一致する学習済みPANASONIC_ACスロットが見つからず、model=-1のまま");
+    }
+  }
+
   saveAcState();
+}
+
+void IrController::acSetModel(uint8_t modelWire) {
+  if (acState_.protocol == decode_type_t::UNKNOWN) return;
+  stdAc::state_t prev = acState_;
+  acState_.model = (modelWire == 255) ? (int16_t)-1 : (int16_t)modelWire;
+  Serial.printf("acSetModel: model=%d に変更し即送信\n", acState_.model);
+  bool ok = irac_->sendAc(acState_, &prev);
+  Serial.printf("acSetModel: send %s\n", ok ? "OK" : "failed");
+  if (ok) saveAcState();
 }
 
 bool IrController::acApplyState(bool power, uint8_t mode, uint8_t temp, uint8_t fan, bool swing) {
@@ -231,6 +268,8 @@ String IrController::acStateLine() const {
   line += (int)acState_.fanspeed;
   line += ",";
   line += (acState_.swingv == stdAc::swingv_t::kOff ? "0" : "1");
+  line += ",";
+  line += (int)acState_.model;
   return line;
 }
 

@@ -12,6 +12,7 @@
 extern MyBLE *ble;
 extern TaskHandle_t hLearnTask;
 extern uint8_t g_learnTargetSlot;   // STATE_LEARNING 遷移直前にセットする学習対象スロット
+extern bool g_cloudModeActive;      // true: BLEを止めてAWS IoT接続中(排他モード、戻すには電源再投入)
 
 // Event Queue Interface
 void init_event_queue();

@@ -4,6 +4,9 @@
 void StateAdvertise::onEnter()
 {
   Serial.println("Entering STATE_ADVERTISE");
+  // クラウドモード切替時、BLEDevice::deinit()に伴うEVT_BLE_DISCONNECTEDが遅れて処理され
+  // ここに来ることがある。BLEスタックは既に破棄済みなのでadvertiseStart()を呼んではいけない
+  if (g_cloudModeActive) return;
   ble->advertiseStart();
 }
 

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_bt.h>
 
 #include "common/MyGlobal.h"
 #include "states/StateManager.h"
@@ -11,6 +12,24 @@ const uint16_t kRecvPin = 27;      // VS1838B OUT
 const uint16_t kSendPin = 26;      // SGN119 (トランジスタ駆動)
 
 static StateManager stateManager;
+
+/**
+ * @brief BLEを止めてAWS IoT(TLS)接続用にメモリを空ける。
+ * BLE+WiFi+TLSを同時に賄うだけのヒープが無いための排他運用。
+ * 元に戻すには電源再投入(起動時は常にBLEモードがデフォルト)が必要。
+ */
+void enterCloudMode()
+{
+  Serial.println("Switching to CLOUD mode: stopping BLE to free memory for AWS IoT TLS");
+  ble->notify("mode,cloud_switching");
+  delay(300);  // notifyが実際に送信されるまでの猶予
+
+  ble->advertiseStop();
+  BLEDevice::deinit(true);
+
+  g_cloudModeActive = true;
+  Serial.println("BLE stopped. AWS IoT connection will proceed via awsIotTaskFunc.");
+}
 
 /**
  * @brief 【FreeRTOS Task】AWS IoT Core(Device Shadow)接続の維持 (Priority 1)
@@ -72,6 +91,11 @@ void setup()
   delay(500);
   Serial.println("Booting IR-Remote-ESP32 (BLE)");
 
+  // BLEのみ使用しClassic Bluetoothは不要なため、esp_bt_controller_init()より前に
+  // Classic BT用メモリを解放しておく(WiFi+TLS(mbedTLS)がヒープ不足で
+  // "SSL - Memory allocation failed"になるのを防ぐ、数十KB単位で空く)
+  esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+
   init_event_queue();
 
   static StateAdvertise sAdvertise;
@@ -89,7 +113,9 @@ void setup()
   stateManager.changeState(STATE_ADVERTISE);
 
   xTaskCreatePinnedToCore(irLearnTaskFunc, "IrLearnTask", 4096, NULL, 2, &hLearnTask, 1);
-  xTaskCreatePinnedToCore(awsIotTaskFunc, "AwsIotTask", 8192, NULL, 1, NULL, 1);
+  // mbedTLSのTLSハンドシェイク(RSA)はスタック消費が大きく、8KBだと不足して
+  // スタックオーバーフロー→隣接メモリ破損(間欠的なPKパースエラー等)を起こすことがあるため増量
+  xTaskCreatePinnedToCore(awsIotTaskFunc, "AwsIotTask", 16384, NULL, 1, NULL, 1);
 }
 
 /**
@@ -98,6 +124,11 @@ void setup()
 void loop()
 {
   MyEvent event = dequeue(portMAX_DELAY);
+  if (event.id == EVT_CMD_ENABLE_CLOUD_MODE)
+  {
+    enterCloudMode();
+    return;
+  }
   if (event.id != EVT_NOP)
   {
     stateManager.handleEvent(&event);

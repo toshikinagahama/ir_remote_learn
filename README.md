@@ -203,10 +203,29 @@ zip -r function.zip index.js node_modules package.json
 aws lambda update-function-code --function-name ir-remote-alexa-skill --zip-file fileb://function.zip --region us-west-2
 ```
 
+### BLE / クラウド(Alexa)の排他運用
+
+**BLEとAWS IoT(TLS)を同時に稼働できない。** ESP32(PSRAM非搭載、WROOM系)は、BLEサーバー+WiFiスタック+mbedTLSのフルTLSハンドシェイクを同時に賄うだけのヒープが無い。原因は主に2つ:
+
+- BLEスタックがヒープを常時50〜70KB程度確保する
+- このプロジェクトが使うPlatformIOのプリコンパイル済みmbedTLSは`MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH`が無効設定でビルドされており、TLSセッション中は送受信バッファを**固定16KB×2=32KB**確保し続ける(MQTTペイロードが数百バイトでも関係ない)。プリコンパイル済みバイナリのためコード側から縮小不可
+
+これらを足すとBLE+WiFi+TLSの同時稼働に必要なメモリが常時不足し、`X509 - Certificate verification failed`や`SSL - Memory allocation failed`が安定して発生する(一時的な負荷ではなく恒常的な不足)。
+
+**対策として排他モードを実装**:
+
+- 起動時は常に**BLEモード**がデフォルト(今まで通りの動作、AWS IoTへは接続しない)
+- `web/remote.html`のWiFi設定パネルから「クラウドモードへ切替」を実行すると、`BLEDevice::deinit()`でBLEスタックを完全停止しメモリを解放→AWS IoT(TLS)接続を開始する
+- クラウドモードからBLEモードに戻すには**本体の電源を入れ直す**(電源再投入)必要がある。ソフトウェア的な自動復帰は無い(起動時に常にBLEモードへ戻る設計のため)
+
+追加コマンド: `ENABLE_CLOUD_MODE` (`0x05 0x04`、payload無し)。切替直前に`mode,cloud_switching`をnotifyしてからBLEを停止する。
+
 ### 既知の制約(Alexa連携)
 
+- 上記の通りBLEとAlexa操作は同時に使えない(排他)
 - shadow deltaは変更フィールドのみ届く。ESP32側は未指定フィールドを現在値で埋めてから適用する(`IrController::getAcWireState()`)。ここを間違えると「温度だけ変えたら電源が切れる」といった事故になる
 - Alexa標準の`ThermostatController`は除湿(DRY)・送風(FAN)モードを持たないため、音声では冷房/暖房/自動/オフのみ操作可能(除湿等は`web/remote.html`側のみで操作)
+- TLS証明書の有効期限検証にはNTP時刻同期が必須(ESP32はRTC電池が無くリセットで1970年に戻るため)。`AwsIotClient::ensureTimeSynced()`がWiFi接続後に自動でNTP同期してから接続を開始する
 - Cognitoユーザーは個人利用前提の単一アカウント。複数人で使う場合はユーザー追加が必要
 
 ## 回路図

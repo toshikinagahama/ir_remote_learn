@@ -64,6 +64,8 @@ public:
   // ライブラリが対応する全ブランドを "acbrand,<id>,<name>" 形式で1件ずつcallbackへ渡す
   void forEachSupportedAcBrand(void (*callback)(const String &line)) const;
   void acSetBrand(decode_type_t protocol);
+  // プロトコル依存の型番indexを直接指定する(学習データが無い場合の手動試行用)。255で未指定(-1)に戻す
+  void acSetModel(uint8_t modelWire);
   // mode: 0=auto 1=cool 2=heat 3=dry 4=fan / fan: stdAc::fanspeed_t の値をそのまま / swing: 0=off 1=auto
   bool acApplyState(bool power, uint8_t mode, uint8_t temp, uint8_t fan, bool swing);
   String acStateLine() const;  // "ac_state,<power>,<protocol_id>,<protocol_name>,<mode>,<temp>,<fan>,<swing>"

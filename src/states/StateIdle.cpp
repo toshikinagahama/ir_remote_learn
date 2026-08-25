@@ -123,6 +123,15 @@ MyState StateIdle::handleEvent(const MyEvent *event)
     }
     return STATE_IDLE;
 
+  case EVT_CMD_SET_AC_MODEL:
+    if (event->length >= 1)
+    {
+      irController.acSetModel(event->payload[0]);
+      ble->notify(irController.acStateLine().c_str());
+      awsIotClient.publishAcState();
+    }
+    return STATE_IDLE;
+
   case EVT_CMD_SET_WIFI_SSID:
     if (event->length >= 1)
     {

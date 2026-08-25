@@ -331,6 +331,25 @@
         </div>
       </div>
       <div class="ac-disabled-hint" id="acHint">接続後、ブランドを選択してください</div>
+      <div class="log-header" id="acModelHeader">
+        <span>型番(詳細設定) ▾</span>
+        <span id="acModelStatus" class="ac-power-status"></span>
+      </div>
+      <div class="log-box" id="acModelBox">
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 8px;">
+          実機が反応しない場合、ブランドによっては型番指定が必要な場合がある。下から選ぶと即座にその型番で送信して試せる。
+        </p>
+        <select id="acModelSelect">
+          <option value="255">型番: 未指定(デフォルト)</option>
+          <option value="0">型番: Unknown(0)</option>
+          <option value="1">型番: LKE(1)</option>
+          <option value="2">型番: NKE(2)</option>
+          <option value="3">型番: DKE/PKR(3)</option>
+          <option value="4">型番: JKE(4)</option>
+          <option value="5">型番: CKP(5)</option>
+          <option value="6">型番: RKR(6)</option>
+        </select>
+      </div>
     </div>
 
     <div id="tabContentSlots" style="display:none">
@@ -352,6 +371,13 @@
       <input type="password" id="wifiPwInput" placeholder="パスワード">
       <div class="modal-row">
         <button class="btn-secondary" id="btnSaveWifi">保存して接続</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:8px 0;">
+        ESP32はBLE+WiFi+クラウド接続を同時に賄うメモリが無いため排他運用。
+        下のボタンでBLEを止めてAlexa(クラウド)操作に切り替える。<strong>元に戻すには本体の電源を入れ直す</strong>こと(起動時は常にBLEモードから始まる)。
+      </p>
+      <div class="modal-row">
+        <button class="btn-danger" id="btnEnableCloudMode">クラウドモードへ切替（BLE切断）</button>
       </div>
     </div>
   </div>
@@ -413,10 +439,12 @@
     SET_AC_BRAND:    [0x04, 0x01],
     GET_AC_STATE:    [0x04, 0x02],
     SET_AC_STATE:    [0x04, 0x03],
+    SET_AC_MODEL:    [0x04, 0x04],
     SET_WIFI_SSID:   [0x05, 0x00],
     SET_WIFI_PW:     [0x05, 0x01],
     GET_WIFI_STATUS: [0x05, 0x02],
     CONNECT_WIFI:    [0x05, 0x03],
+    ENABLE_CLOUD_MODE: [0x05, 0x04],
   };
 
   const AC_MODES = [
@@ -429,7 +457,7 @@
 
   const acState = {
     power: false, protocolId: 0, protocolName: '',
-    mode: 0, temp: 25, fan: 0, swing: false,
+    mode: 0, temp: 25, fan: 0, swing: false, model: -1,
   };
 
   let bleDevice = null;
@@ -473,6 +501,13 @@
     wifiStatusBadge.textContent = '接続試行中...';
   });
 
+  const btnEnableCloudMode = document.getElementById('btnEnableCloudMode');
+  btnEnableCloudMode.addEventListener('click', async () => {
+    if (!confirm('BLEを切断してクラウド(Alexa)モードに切り替える。元に戻すには本体の電源を入れ直す必要がある。よろしいか？')) return;
+    await writeRaw(new Uint8Array(BLECmd.ENABLE_CLOUD_MODE));
+    log('クラウドモードへ切替コマンド送信。まもなくBLEが切断される。');
+  });
+
   const modalOverlay = document.getElementById('modalOverlay');
   const modalTitle = document.getElementById('modalTitle');
   const modalStatus = document.getElementById('modalStatus');
@@ -494,6 +529,17 @@
   const acFanSelect = document.getElementById('acFanSelect');
   const acSwingSwitch = document.getElementById('acSwingSwitch');
   const acHint = document.getElementById('acHint');
+  const acModelHeader = document.getElementById('acModelHeader');
+  const acModelBox = document.getElementById('acModelBox');
+  const acModelSelect = document.getElementById('acModelSelect');
+  const acModelStatus = document.getElementById('acModelStatus');
+
+  acModelHeader.addEventListener('click', () => acModelBox.classList.toggle('show'));
+
+  acModelSelect.addEventListener('change', () => {
+    if (!acState.protocolId) return;
+    writeRaw(new Uint8Array([...BLECmd.SET_AC_MODEL, Number(acModelSelect.value)]));
+  });
 
   AC_MODES.forEach((m) => {
     const el = document.createElement('div');
@@ -873,9 +919,15 @@
       acState.temp = parseInt(parts[5], 10) || 25;
       acState.fan = parseInt(parts[6], 10) || 0;
       acState.swing = parts[7] === '1';
+      acState.model = parts[8] !== undefined ? parseInt(parts[8], 10) : -1;
       if (acState.protocolId && Array.from(acBrandSelect.options).some((o) => o.value === String(acState.protocolId))) {
         acBrandSelect.value = String(acState.protocolId);
       }
+      const modelWire = (acState.model === -1) ? '255' : String(acState.model);
+      if (Array.from(acModelSelect.options).some((o) => o.value === modelWire)) {
+        acModelSelect.value = modelWire;
+      }
+      acModelStatus.textContent = acState.model === -1 ? '未指定' : `型番${acState.model}`;
       renderAc();
     }
   }

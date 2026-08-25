@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
 
 /**
  * @brief AWS IoT Core (Device Shadow) とのMQTT/TLS接続を担当
@@ -25,9 +26,12 @@ private:
   WiFiClientSecure tlsClient_;
   PubSubClient mqttClient_{tlsClient_};
   bool subscribed_ = false;
+  bool timeSynced_ = false;
 
+  bool ensureTimeSynced();  // TLS証明書の有効期限検証にはNTP時刻同期が必須(RTC電池が無いため)
   void ensureConnected();
   void onMessage(char *topic, uint8_t *payload, unsigned int length);
+  void processDelta(JsonObject state);
   static void onMessageTrampoline(char *topic, uint8_t *payload, unsigned int length);
 };
 
