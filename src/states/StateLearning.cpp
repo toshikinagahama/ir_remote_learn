@@ -24,19 +24,19 @@ MyState StateLearning::handleEvent(const MyEvent *event)
   {
   case EVT_CMD_LEARN_CANCEL:
     ble->notify("learn,cancelled");
-    return g_learnReturnState;
+    return STATE_IDLE;
 
   case EVT_IR_LEARN_SUCCESS:
     ble->notify(irController.slotInfoLine(g_learnTargetSlot).c_str());
-    return g_learnReturnState;
+    return STATE_IDLE;
 
   case EVT_IR_LEARN_UNKNOWN:
     ble->notify("learn,unknown");
-    return g_learnReturnState;
+    return STATE_IDLE;
 
   case EVT_IR_LEARN_TIMEOUT:
     ble->notify("learn,timeout");
-    return g_learnReturnState;
+    return STATE_IDLE;
 
   case EVT_BLE_DISCONNECTED:
     return STATE_ADVERTISE;

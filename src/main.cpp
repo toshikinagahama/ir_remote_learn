@@ -9,7 +9,6 @@
 // ピン配置（ESP32-DEVKITC-VIE ストラッピングピン回避）
 const uint16_t kRecvPin = 27;      // VS1838B OUT
 const uint16_t kSendPin = 26;      // SGN119 (トランジスタ駆動)
-const uint16_t kLearnBtnPin = 25;  // タクトスイッチ（片側GND、内部プルアップ使用）
 
 static StateManager stateManager;
 
@@ -54,34 +53,11 @@ void irLearnTaskFunc(void *arg)
   }
 }
 
-/**
- * @brief タクトスイッチの押下エッジを検出し EVT_BTN_LEARN_PRESSED を発行する
- * (BLE経由のLEARN_STARTと同じSTATE_LEARNINGパスを通る = 単発トリガー、押している間の維持は行わない)
- */
-void checkLearnButton()
-{
-  static bool lastState = HIGH;
-  bool state = digitalRead(kLearnBtnPin);
-
-  if (lastState == HIGH && state == LOW)
-  {
-    delay(20);  // チャタリング防止
-    if (digitalRead(kLearnBtnPin) == LOW)
-    {
-      enqueue(EVT_BTN_LEARN_PRESSED);
-    }
-  }
-
-  lastState = state;
-}
-
 void setup()
 {
   Serial.begin(115200);
   delay(500);
   Serial.println("Booting IR-Remote-ESP32 (BLE)");
-
-  pinMode(kLearnBtnPin, INPUT_PULLUP);
 
   init_event_queue();
 
@@ -101,13 +77,11 @@ void setup()
 }
 
 /**
- * @brief 【Main Task / loop()】イベントディスパッチ＆物理ボタンポーリング
+ * @brief 【Main Task / loop()】イベントディスパッチ
  */
 void loop()
 {
-  checkLearnButton();
-
-  MyEvent event = dequeue(pdMS_TO_TICKS(20));
+  MyEvent event = dequeue(portMAX_DELAY);
   if (event.id != EVT_NOP)
   {
     stateManager.handleEvent(&event);

@@ -45,7 +45,6 @@ enum MyEventID {
   EVT_CMD_SET_AC_BRAND,
   EVT_CMD_GET_AC_STATE,
   EVT_CMD_SET_AC_STATE,
-  EVT_BTN_LEARN_PRESSED,   // 物理タクトスイッチ(常にスロット0を学習)
   EVT_IR_LEARN_SUCCESS,    // 学習タスクからの内部通知
   EVT_IR_LEARN_UNKNOWN,
   EVT_IR_LEARN_TIMEOUT,

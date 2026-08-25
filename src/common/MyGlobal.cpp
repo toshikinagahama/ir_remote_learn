@@ -4,7 +4,6 @@ static MyBLE ble_inst;
 MyBLE *ble = &ble_inst;
 TaskHandle_t hLearnTask = NULL;
 uint8_t g_learnTargetSlot = 0;
-MyState g_learnReturnState = STATE_ADVERTISE;
 
 static QueueHandle_t xEventQueue = NULL;
 static const uint8_t DEFAULT_PAYLOAD[1] = {0};

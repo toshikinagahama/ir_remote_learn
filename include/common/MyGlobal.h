@@ -10,7 +10,6 @@
 extern MyBLE *ble;
 extern TaskHandle_t hLearnTask;
 extern uint8_t g_learnTargetSlot;   // STATE_LEARNING 遷移直前にセットする学習対象スロット
-extern MyState g_learnReturnState;  // 学習完了/中断/タイムアウト後に戻る状態(IDLE or ADVERTISE)
 
 // Event Queue Interface
 void init_event_queue();

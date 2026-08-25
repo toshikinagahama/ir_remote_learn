@@ -15,12 +15,6 @@ MyState StateAdvertise::handleEvent(const MyEvent *event)
     Serial.println("BLE Connected -> Transition to STATE_IDLE");
     return STATE_IDLE;
 
-  case EVT_BTN_LEARN_PRESSED:
-    // BLE未接続でも物理ボタンでの学習は独立して動作させる(スロット0固定)
-    g_learnTargetSlot = 0;
-    g_learnReturnState = STATE_ADVERTISE;
-    return STATE_LEARNING;
-
   default:
     return STATE_ADVERTISE;
   }

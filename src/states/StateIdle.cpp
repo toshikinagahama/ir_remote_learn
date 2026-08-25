@@ -84,15 +84,9 @@ MyState StateIdle::handleEvent(const MyEvent *event)
     if (event->length >= 1)
     {
       g_learnTargetSlot = event->payload[0];
-      g_learnReturnState = STATE_IDLE;
       return STATE_LEARNING;
     }
     return STATE_IDLE;
-
-  case EVT_BTN_LEARN_PRESSED:
-    g_learnTargetSlot = 0;
-    g_learnReturnState = STATE_IDLE;
-    return STATE_LEARNING;
 
   case EVT_CMD_GET_AC_BRANDS:
     irController.forEachSupportedAcBrand(notifyAcBrandLine);
