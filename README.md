@@ -142,6 +142,73 @@ IRremoteESP8266の`IRac`クラスを利用し、学習不要でブランド選�
 - MITM/PINペアリングは未実装(Web Bluetoothとの相性を優先し暗号化なしのシンプル構成にした)。近くにいれば誰でも接続・操作できるため、屋外等で使う場合は注意
 - ラベルは17バイト(UTF-8)まで。日本語だと5〜8文字程度が目安
 
+## Alexa音声操作 (AWS IoT Core + Smart Homeスキル)
+
+「アレクサ、テレビつけて」「アレクサ、エアコンを26度にして」のような音声操作に対応。BLEはスマホが近くにいる時専用なので、クラウド経由でどこからでも操作できるようにする狙い。
+
+### アーキテクチャ
+
+```
+Echo端末 → Alexaクラウド → Smart Homeスキル(Lambda, aws/lambda/index.js)
+                              → AWS IoT Core Device Shadow を更新(desired)
+                                → ESP32(WiFi+MQTT/TLS常時接続)がdeltaを購読
+                                  → 既存の enqueue() イベントバスに投入
+                                  → StateIdle.cpp の既存ハンドラがそのまま処理
+                                    (EVT_CMD_SEND_SLOT / EVT_CMD_SET_AC_STATE を再利用)
+                                  → 処理後、Shadowのreportedを更新して応答
+```
+
+BLEコマンドと全く同じ「外部入力→`enqueue()`→既存State」の経路を通すため、State側の新規ロジックはほぼ無い。`AwsIotClient`はMQTT delta JSONを既存イベントへ変換するだけの薄いアダプタ。
+
+### ESP32側の構成
+
+| ファイル | 役割 |
+|---|---|
+| `include/WifiManager.h` / `src/WifiManager.cpp` | WiFi認証情報の永続化(NVS)・接続管理。`web/remote.html`からBLE経由で設定 |
+| `include/AwsIotClient.h` / `src/AwsIotClient.cpp` | AWS IoT Core(Device Shadow)とのMQTT/TLS接続。専用FreeRTOSタスク(`awsIotTaskFunc`)が継続的に維持 |
+| `include/secrets.h` | 証明書・秘密鍵・エンドポイント(gitignore対象、`secrets.h.example`がテンプレート) |
+
+WiFi設定コマンド(カテゴリ0x05):
+
+| コマンド | バイト列 | 説明 |
+|---|---|---|
+| SET_WIFI_SSID | `0x05 0x00 ...ssid(UTF-8)` | SSID設定 |
+| SET_WIFI_PW | `0x05 0x01 ...password(UTF-8)` | パスワード設定 |
+| GET_WIFI_STATUS | `0x05 0x02` | 接続状態取得 |
+| CONNECT_WIFI | `0x05 0x03` | 保存済み認証情報で接続開始 |
+
+`web/remote.html`下部の「WiFi設定」パネルから設定可能。接続状態は`wifi_status,<connected>,<ssid>,<ip>`としてnotifyされる。
+
+### AWS側の構成
+
+| リソース | 内容 |
+|---|---|
+| AWS IoT Core | Thing `ir-remote-esp32-01`(ap-northeast-1)。証明書のポリシーは`$aws/things/ir-remote-esp32-01/shadow/*`のみに限定 |
+| Lambda | `ir-remote-alexa-skill`。**us-west-2**にデプロイ(Alexa Smart Homeスキルは極東/FEリージョンのLambdaをus-west-2にしか置けない制約があるため、IoT Core自体はTokyoのまま、LambdaのSDKクライアントだけリージョンを明示指定してクロスリージョンで呼んでいる) |
+| Cognito User Pool | `ir-remote-alexa-users`。Alexaのアカウントリンク用OAuth2プロバイダ(`/oauth2/authorize`・`/oauth2/token`を利用、自前OAuthサーバーは書いていない) |
+| Alexaスキル | Smart Homeスキル「IRリモコン」。`aws/skill-manifest.json`・`aws/account-linking.json`(テンプレート、実値は`clientSecret`のみ手動で埋める)。作成・デプロイは`ask smapi`(ASK CLI)で実施 |
+
+### Lambda(`aws/lambda/index.js`)が処理するディレクティブ
+
+- `Alexa.Discovery.Discover`: shadowのreported.slots(ラベル付きスロット一覧)を`Alexa.SceneController`エンドポイントとして返す。生の学習コードはトグル式の状態を持たないため`PowerController`ではなく`SceneController`(Activate系)を採用。加えてエアコン用に`ThermostatController`+`PowerController`を持つ固定エンドポイント`ac-1`を追加
+- `Alexa.SceneController.Activate`: shadow desiredに`{sendSlot: n}`を書き込み
+- `Alexa.ThermostatController.*` / `Alexa.PowerController.*`: shadow desiredに`{power, mode, temp, fan, swing}`(変更分のみ)を書き込み。Alexa標準の温度モードは`AUTO`/`COOL`/`HEAT`/`OFF`のみ対応(除湿・送風はAlexa標準インターフェースに無いため`AUTO`扱いにフォールバック)
+- `Alexa.ReportState`: shadowのreportedを読んで返す
+
+デプロイ:
+```
+cd aws/lambda
+npm install --production
+zip -r function.zip index.js node_modules package.json
+aws lambda update-function-code --function-name ir-remote-alexa-skill --zip-file fileb://function.zip --region us-west-2
+```
+
+### 既知の制約(Alexa連携)
+
+- shadow deltaは変更フィールドのみ届く。ESP32側は未指定フィールドを現在値で埋めてから適用する(`IrController::getAcWireState()`)。ここを間違えると「温度だけ変えたら電源が切れる」といった事故になる
+- Alexa標準の`ThermostatController`は除湿(DRY)・送風(FAN)モードを持たないため、音声では冷房/暖房/自動/オフのみ操作可能(除湿等は`web/remote.html`側のみで操作)
+- Cognitoユーザーは個人利用前提の単一アカウント。複数人で使う場合はユーザー追加が必要
+
 ## 回路図
 
 EasyEDA Proで回路図を作成済み（プロジェクト名: `ir_remote_learn`）。
