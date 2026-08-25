@@ -4,3 +4,6 @@
 .vscode/launch.json
 .vscode/ipch
 .DS_Store
+include/secrets.h
+aws/lambda/node_modules
+aws/lambda/function.zip

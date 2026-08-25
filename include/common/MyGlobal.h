@@ -6,6 +6,8 @@
 #include "common/MyEvent.h"
 #include "MyBLE.h"
 #include "IrController.h"
+#include "WifiManager.h"
+#include "AwsIotClient.h"
 
 extern MyBLE *ble;
 extern TaskHandle_t hLearnTask;

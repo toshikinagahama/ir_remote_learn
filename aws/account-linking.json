@@ -1,0 +1,10 @@
+{
+  "type": "AUTH_CODE",
+  "authorizationUrl": "https://ir-remote-alexa-453393474681.auth.ap-northeast-1.amazoncognito.com/oauth2/authorize",
+  "accessTokenUrl": "https://ir-remote-alexa-453393474681.auth.ap-northeast-1.amazoncognito.com/oauth2/token",
+  "clientId": "71udn5l3pj7mmq3jo2a0mpq3g3",
+  "clientSecret": "REPLACE_ME",
+  "clientAuthenticationScheme": "HTTP_BASIC",
+  "scopes": ["openid"],
+  "domains": []
+}

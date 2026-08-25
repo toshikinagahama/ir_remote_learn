@@ -67,6 +67,14 @@ public:
   // mode: 0=auto 1=cool 2=heat 3=dry 4=fan / fan: stdAc::fanspeed_t の値をそのまま / swing: 0=off 1=auto
   bool acApplyState(bool power, uint8_t mode, uint8_t temp, uint8_t fan, bool swing);
   String acStateLine() const;  // "ac_state,<power>,<protocol_id>,<protocol_name>,<mode>,<temp>,<fan>,<swing>"
+  bool acHasBrand() const { return acState_.protocol != decode_type_t::UNKNOWN; }
+  // shadow deltaが一部フィールドしか含まない場合に、未指定分の現在値で埋めるためのgetter
+  void getAcWireState(bool &power, uint8_t &mode, uint8_t &temp, uint8_t &fan, bool &swing) const;
+  // AWS IoT Device Shadowのreported用JSON断片 {"power":..,"mode":..,"temp":..,"fan":..,"swing":..}
+  String acShadowJson() const;
+  // ラベル付き(valid && label非空)スロットのみを列挙したJSON配列 [{"slot":n,"label":..,"category":..},...]
+  // Alexa Discoveryのエンドポイント一覧をLambda側が組み立てる元データ
+  String slotsShadowJson() const;
 
 private:
   IRrecv *irrecv_ = nullptr;

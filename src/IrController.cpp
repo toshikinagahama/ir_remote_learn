@@ -206,15 +206,17 @@ bool IrController::acApplyState(bool power, uint8_t mode, uint8_t temp, uint8_t 
   return ok;
 }
 
-String IrController::acStateLine() const {
-  uint8_t wireMode = 0;
-  switch (acState_.mode) {
-    case stdAc::opmode_t::kCool: wireMode = 1; break;
-    case stdAc::opmode_t::kHeat: wireMode = 2; break;
-    case stdAc::opmode_t::kDry:  wireMode = 3; break;
-    case stdAc::opmode_t::kFan:  wireMode = 4; break;
-    default: wireMode = 0; break;  // kAuto/kOff
+static uint8_t opmodeToWire(stdAc::opmode_t mode) {
+  switch (mode) {
+    case stdAc::opmode_t::kCool: return 1;
+    case stdAc::opmode_t::kHeat: return 2;
+    case stdAc::opmode_t::kDry:  return 3;
+    case stdAc::opmode_t::kFan:  return 4;
+    default: return 0;  // kAuto/kOff
   }
+}
+
+String IrController::acStateLine() const {
   String line = "ac_state,";
   line += (acState_.power ? "1" : "0");
   line += ",";
@@ -222,7 +224,7 @@ String IrController::acStateLine() const {
   line += ",";
   line += (acState_.protocol == decode_type_t::UNKNOWN) ? "" : typeToString(acState_.protocol).c_str();
   line += ",";
-  line += wireMode;
+  line += opmodeToWire(acState_.mode);
   line += ",";
   line += (int)acState_.degrees;
   line += ",";
@@ -230,6 +232,60 @@ String IrController::acStateLine() const {
   line += ",";
   line += (acState_.swingv == stdAc::swingv_t::kOff ? "0" : "1");
   return line;
+}
+
+void IrController::getAcWireState(bool &power, uint8_t &mode, uint8_t &temp, uint8_t &fan, bool &swing) const {
+  power = acState_.power;
+  mode = opmodeToWire(acState_.mode);
+  temp = (uint8_t)acState_.degrees;
+  fan = (uint8_t)acState_.fanspeed;
+  swing = (acState_.swingv != stdAc::swingv_t::kOff);
+}
+
+String IrController::acShadowJson() const {
+  String j = "{\"power\":";
+  j += (acState_.power ? "true" : "false");
+  j += ",\"mode\":";
+  j += opmodeToWire(acState_.mode);
+  j += ",\"temp\":";
+  j += (int)acState_.degrees;
+  j += ",\"fan\":";
+  j += (int)acState_.fanspeed;
+  j += ",\"swing\":";
+  j += (acState_.swingv == stdAc::swingv_t::kOff ? "false" : "true");
+  j += "}";
+  return j;
+}
+
+static String jsonEscape(const String &s) {
+  String out;
+  out.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') out += '\\';
+    out += c;
+  }
+  return out;
+}
+
+String IrController::slotsShadowJson() const {
+  String j = "[";
+  bool first = true;
+  for (uint8_t n = 0; n < kMaxSlots; n++) {
+    const IrSlot &s = slots[n];
+    if (!s.valid || s.label.length() == 0) continue;
+    if (!first) j += ",";
+    first = false;
+    j += "{\"slot\":";
+    j += n;
+    j += ",\"label\":\"";
+    j += jsonEscape(s.label);
+    j += "\",\"category\":";
+    j += s.category;
+    j += "}";
+  }
+  j += "]";
+  return j;
 }
 
 void IrController::saveAcState() {

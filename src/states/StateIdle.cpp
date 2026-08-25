@@ -17,6 +17,7 @@ void StateIdle::onEnter()
     ble->notify(irController.slotInfoLine(n).c_str());
   }
   ble->notify(irController.acStateLine().c_str());
+  ble->notify(wifiManager.statusLine().c_str());
 }
 
 MyState StateIdle::handleEvent(const MyEvent *event)
@@ -47,6 +48,7 @@ MyState StateIdle::handleEvent(const MyEvent *event)
       buf[labelLen] = '\0';
       irController.setLabel(slot, String(buf));
       ble->notify(irController.slotInfoLine(slot).c_str());
+      awsIotClient.publishSlots();  // Alexa Discovery用の一覧をshadowへ反映
     }
     return STATE_IDLE;
 
@@ -57,6 +59,7 @@ MyState StateIdle::handleEvent(const MyEvent *event)
       uint8_t category = event->payload[1];
       irController.setCategory(slot, category);
       ble->notify(irController.slotInfoLine(slot).c_str());
+      awsIotClient.publishSlots();
     }
     return STATE_IDLE;
 
@@ -66,6 +69,7 @@ MyState StateIdle::handleEvent(const MyEvent *event)
       uint8_t slot = event->payload[0];
       irController.deleteSlot(slot);
       ble->notify(irController.slotInfoLine(slot).c_str());
+      awsIotClient.publishSlots();
     }
     return STATE_IDLE;
 
@@ -115,7 +119,33 @@ MyState StateIdle::handleEvent(const MyEvent *event)
       bool swing   = event->payload[4] != 0;
       irController.acApplyState(power, mode, temp, fan, swing);
       ble->notify(irController.acStateLine().c_str());
+      awsIotClient.publishAcState();  // AWS IoT Shadowのreportedも同期(BLE/クラウドどちらの変更でも一致させる)
     }
+    return STATE_IDLE;
+
+  case EVT_CMD_SET_WIFI_SSID:
+    if (event->length >= 1)
+    {
+      wifiManager.setSsid(String((const char *)event->payload, event->length));
+      ble->notify(("wifi_ssid," + wifiManager.getSsid()).c_str());
+    }
+    return STATE_IDLE;
+
+  case EVT_CMD_SET_WIFI_PW:
+    if (event->length >= 1)
+    {
+      wifiManager.setPassword(String((const char *)event->payload, event->length));
+      ble->notify("wifi_pw,saved");
+    }
+    return STATE_IDLE;
+
+  case EVT_CMD_GET_WIFI_STATUS:
+    ble->notify(wifiManager.statusLine().c_str());
+    return STATE_IDLE;
+
+  case EVT_CMD_CONNECT_WIFI:
+    wifiManager.connect();
+    ble->notify("wifi_status,connecting");
     return STATE_IDLE;
 
   default:

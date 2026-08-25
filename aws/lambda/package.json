@@ -1,0 +1,9 @@
+{
+  "name": "ir-remote-alexa-skill",
+  "version": "1.0.0",
+  "description": "Alexa Smart Home skill backend for ir_remote_learn (ESP32 IR remote via AWS IoT Core)",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-iot-data-plane": "^3.600.0"
+  }
+}

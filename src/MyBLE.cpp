@@ -47,6 +47,10 @@ class MyCallbacks : public BLECharacteristicCallbacks
     case BLECmd::SET_AC_BRAND:    if (!payload.empty()) enqueue(EVT_CMD_SET_AC_BRAND, payload.data(), payload.length()); break;
     case BLECmd::GET_AC_STATE:    enqueue(EVT_CMD_GET_AC_STATE); break;
     case BLECmd::SET_AC_STATE:    if (!payload.empty()) enqueue(EVT_CMD_SET_AC_STATE, payload.data(), payload.length()); break;
+    case BLECmd::SET_WIFI_SSID:   if (!payload.empty()) enqueue(EVT_CMD_SET_WIFI_SSID, payload.data(), payload.length()); break;
+    case BLECmd::SET_WIFI_PW:     if (!payload.empty()) enqueue(EVT_CMD_SET_WIFI_PW, payload.data(), payload.length()); break;
+    case BLECmd::GET_WIFI_STATUS: enqueue(EVT_CMD_GET_WIFI_STATUS); break;
+    case BLECmd::CONNECT_WIFI:    enqueue(EVT_CMD_CONNECT_WIFI); break;
     default:
       Serial.printf("Unknown BLE Cmd: 0x%04X\n", cmd);
       break;

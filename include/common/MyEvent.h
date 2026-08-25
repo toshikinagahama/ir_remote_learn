@@ -27,6 +27,12 @@ namespace BLECmd {
   constexpr uint16_t SET_AC_BRAND    = 0x0401;  // payload: protocol_id(2B little-endian)
   constexpr uint16_t GET_AC_STATE    = 0x0402;
   constexpr uint16_t SET_AC_STATE    = 0x0403;  // payload: power(1B) mode(1B) temp(1B) fan(1B) swing(1B)
+
+  // WiFi/クラウド連携系
+  constexpr uint16_t SET_WIFI_SSID   = 0x0500;  // payload: ssid(UTF-8)
+  constexpr uint16_t SET_WIFI_PW     = 0x0501;  // payload: password(UTF-8)
+  constexpr uint16_t GET_WIFI_STATUS = 0x0502;
+  constexpr uint16_t CONNECT_WIFI    = 0x0503;
 }
 
 enum MyEventID {
@@ -45,6 +51,10 @@ enum MyEventID {
   EVT_CMD_SET_AC_BRAND,
   EVT_CMD_GET_AC_STATE,
   EVT_CMD_SET_AC_STATE,
+  EVT_CMD_SET_WIFI_SSID,
+  EVT_CMD_SET_WIFI_PW,
+  EVT_CMD_GET_WIFI_STATUS,
+  EVT_CMD_CONNECT_WIFI,
   EVT_IR_LEARN_SUCCESS,    // 学習タスクからの内部通知
   EVT_IR_LEARN_UNKNOWN,
   EVT_IR_LEARN_TIMEOUT,

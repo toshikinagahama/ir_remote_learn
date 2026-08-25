@@ -13,6 +13,19 @@ const uint16_t kSendPin = 26;      // SGN119 (トランジスタ駆動)
 static StateManager stateManager;
 
 /**
+ * @brief 【FreeRTOS Task】AWS IoT Core(Device Shadow)接続の維持 (Priority 1)
+ * WiFi接続後、常時MQTT接続を維持しshadow deltaを受信し続ける
+ */
+void awsIotTaskFunc(void *arg)
+{
+  while (1)
+  {
+    awsIotClient.loop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
+/**
  * @brief 【FreeRTOS Task】STATE_LEARNING中のみ動作するIR受信ポーリングタスク (Priority 2)
  * StateLearning::onEnter() の xTaskNotifyGive() で起床する
  */
@@ -70,10 +83,13 @@ void setup()
 
   ble->initialize();
   irController.begin(kRecvPin, kSendPin);
+  wifiManager.begin();
+  awsIotClient.begin();
 
   stateManager.changeState(STATE_ADVERTISE);
 
   xTaskCreatePinnedToCore(irLearnTaskFunc, "IrLearnTask", 4096, NULL, 2, &hLearnTask, 1);
+  xTaskCreatePinnedToCore(awsIotTaskFunc, "AwsIotTask", 8192, NULL, 1, NULL, 1);
 }
 
 /**

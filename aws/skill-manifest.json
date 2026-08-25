@@ -1,0 +1,31 @@
+{
+  "vendorId": "MMLLKMIHZNVPS",
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "ja-JP": {
+          "name": "IRリモコン",
+          "summary": "ESP32 IR学習リモコンをAlexaから操作",
+          "description": "自作のESP32赤外線学習リモコン(ir_remote_learn)をAlexaから音声操作します。学習済みのテレビ・照明シーン、およびエアコンの電源・温度・モードを操作できます。",
+          "examplePhrases": [
+            "アレクサ、テレビをつけて",
+            "アレクサ、エアコンを26度にして",
+            "アレクサ、エアコンを消して"
+          ],
+          "keywords": ["赤外線", "リモコン", "ESP32", "エアコン"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["JP"],
+      "category": "SMART_HOME"
+    },
+    "apis": {
+      "smartHome": {
+        "endpoint": {
+          "uri": "arn:aws:lambda:us-west-2:453393474681:function:ir-remote-alexa-skill"
+        }
+      }
+    },
+    "manifestVersion": "1.0"
+  }
+}
