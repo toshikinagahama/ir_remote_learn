@@ -61,14 +61,13 @@ void irLearnTaskFunc(void *arg)
     {
       if (irController.pollDecode())
       {
-        if (irController.isLastDecodeUnknown())
+        if (irController.storeLastDecodeToSlot(g_learnTargetSlot))
         {
-          enqueue(EVT_IR_LEARN_UNKNOWN);
+          enqueue(EVT_IR_LEARN_SUCCESS);
         }
         else
         {
-          irController.storeLastDecodeToSlot(g_learnTargetSlot);
-          enqueue(EVT_IR_LEARN_SUCCESS);
+          enqueue(EVT_IR_LEARN_UNKNOWN);
         }
         done = true;
       }

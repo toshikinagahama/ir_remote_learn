@@ -13,6 +13,9 @@ const uint8_t kMaxSlots = 16;
 // (cmd 2B + slot 1B + label ≤ 20B ATTペイロード上限)
 const uint8_t kLabelMaxLen = 17;
 const uint32_t kLearnTimeoutMs = 15000;
+// 未知プロトコルのraw波形保存用上限(エントリ数)。一般的な家電リモコンは数十〜200程度に収まるため、
+// 16スロット全部がrawで埋まってもNVS容量(数十KB)を圧迫しないよう安全マージンを見て400に制限
+const uint16_t kRawMaxLen = 400;
 
 // スロットのカテゴリ(タブ分け用)
 namespace SlotCategory {
@@ -24,11 +27,14 @@ namespace SlotCategory {
 struct IrSlot {
   bool valid = false;
   bool isState = false;  // true: エアコン等の状態型プロトコル(state配列使用)
+  bool isRaw = false;    // true: 未知プロトコルのraw波形(raw配列使用、isStateとは排他)
   decode_type_t protocol = decode_type_t::UNKNOWN;
   uint64_t value = 0;
   uint16_t bits = 0;
   uint8_t state[kStateSizeMax] = {0};
   uint16_t stateBytes = 0;
+  uint16_t raw[kRawMaxLen] = {0};
+  uint16_t rawLen = 0;
   String label = "";
   uint8_t category = SlotCategory::OTHER;
 };
@@ -46,8 +52,9 @@ public:
   // 学習(受信)用 — StateLearningの専用タスクから毎ループ呼ばれる想定
   void resumeReceiver();
   bool pollDecode();                       // 1回分のdecode試行。受信できればtrue
-  bool isLastDecodeUnknown() const;
-  void storeLastDecodeToSlot(uint8_t n);   // 直近decode結果をスロットnへ保存(NVS永続化含む)
+  // 直近decode結果をスロットnへ保存(NVS永続化含む)。
+  // 未知プロトコルの場合はraw波形として保存を試み、rawLenがkRawMaxLenを超えると保存できずfalseを返す
+  bool storeLastDecodeToSlot(uint8_t n);
 
   // 送信
   bool sendSlot(uint8_t n);

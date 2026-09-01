@@ -25,17 +25,36 @@ bool IrController::pollDecode() {
   return irrecv_->decode(&results_);
 }
 
-bool IrController::isLastDecodeUnknown() const {
-  return results_.decode_type == decode_type_t::UNKNOWN;
-}
-
-void IrController::storeLastDecodeToSlot(uint8_t n) {
-  if (n >= kMaxSlots) return;
+bool IrController::storeLastDecodeToSlot(uint8_t n) {
+  if (n >= kMaxSlots) return false;
   IrSlot &s = slots[n];
+
+  if (results_.decode_type == decode_type_t::UNKNOWN) {
+    // 未知プロトコル: デコードできた既知プロトコルの情報を持たないため、
+    // 受信した生のパルス列(raw波形)をそのまま保存し、送信時に再生する
+    uint16_t rawLen = getCorrectedRawLength(&results_);
+    if (rawLen == 0 || rawLen > kRawMaxLen) return false;
+    uint16_t *rawArr = resultToRawArray(&results_);
+    s.valid = true;
+    s.protocol = decode_type_t::UNKNOWN;
+    s.isState = false;
+    s.isRaw = true;
+    s.rawLen = rawLen;
+    memcpy(s.raw, rawArr, rawLen * sizeof(uint16_t));
+    delete[] rawArr;
+    s.value = 0;
+    s.bits = 0;
+    s.stateBytes = 0;
+    saveSlot(n);
+    return true;
+  }
+
   s.valid = true;
   s.protocol = results_.decode_type;
   s.bits = results_.bits;
   s.isState = hasACState(results_.decode_type);
+  s.isRaw = false;
+  s.rawLen = 0;
   if (s.isState) {
     s.stateBytes = (results_.bits + 7) / 8;
     if (s.stateBytes > kStateSizeMax) s.stateBytes = kStateSizeMax;
@@ -46,11 +65,16 @@ void IrController::storeLastDecodeToSlot(uint8_t n) {
     s.stateBytes = 0;
   }
   saveSlot(n);
+  return true;
 }
 
 bool IrController::sendSlot(uint8_t n) {
   if (n >= kMaxSlots || !slots[n].valid) return false;
   IrSlot &s = slots[n];
+  if (s.isRaw) {
+    irsend_->sendRaw(s.raw, s.rawLen, 38);
+    return true;
+  }
   if (s.isState) {
     return irsend_->send(s.protocol, s.state, s.stateBytes);
   }
@@ -87,7 +111,7 @@ String IrController::slotInfoLine(uint8_t n) const {
   line += ",";
   line += s.label;
   line += ",";
-  line += s.valid ? typeToString(s.protocol).c_str() : "";
+  line += s.valid ? (s.isRaw ? "UNKNOWN(RAW)" : typeToString(s.protocol).c_str()) : "";
   line += ",";
   line += s.bits;
   line += ",";
@@ -103,15 +127,21 @@ void IrController::saveSlot(uint8_t n) {
   prefs_.begin("ircodes", false);
   String key = slotKey(n);
   IrSlot &s = slots[n];
-  uint8_t buf[1 + 1 + 8 + 2 + 2];
+  // 末尾にisRaw(1B)+rawLen(2B)を追加した新形式(17B)。旧形式(13B)のデータはloadSlots側で判別して読む
+  uint8_t buf[1 + 1 + 8 + 2 + 2 + 1 + 2];
   buf[0] = (uint8_t)s.valid;
   buf[1] = (uint8_t)s.isState;
   memcpy(&buf[2], &s.value, 8);
   memcpy(&buf[10], &s.bits, 2);
   memcpy(&buf[12], &s.stateBytes, 2);
+  buf[14] = (uint8_t)s.isRaw;
+  memcpy(&buf[15], &s.rawLen, 2);
   prefs_.putUChar((key + "p").c_str(), (uint8_t)s.protocol);
   prefs_.putBytes(key.c_str(), buf, sizeof(buf));
   prefs_.putBytes((key + "st").c_str(), s.state, kStateSizeMax);
+  if (s.isRaw && s.rawLen > 0) {
+    prefs_.putBytes((key + "rw").c_str(), s.raw, s.rawLen * sizeof(uint16_t));
+  }
   prefs_.putString((key + "lb").c_str(), s.label);
   prefs_.putUChar((key + "c").c_str(), s.category);
   prefs_.end();
@@ -129,16 +159,27 @@ void IrController::loadSlots() {
   bool categoriesInitialized = prefs_.getBool("cat_init", false);
   for (uint8_t n = 0; n < kMaxSlots; n++) {
     String key = slotKey(n);
-    uint8_t buf[1 + 1 + 8 + 2 + 2];
+    uint8_t buf[1 + 1 + 8 + 2 + 2 + 1 + 2];
     size_t len = prefs_.getBytes(key.c_str(), buf, sizeof(buf));
-    if (len == sizeof(buf)) {
+    // 新形式(17B)・旧形式(13B、isRaw追加前に保存されたデータ)の両方を受け付ける
+    if (len == sizeof(buf) || len == 13) {
       slots[n].valid = (bool)buf[0];
       slots[n].isState = (bool)buf[1];
       memcpy(&slots[n].value, &buf[2], 8);
       memcpy(&slots[n].bits, &buf[10], 2);
       memcpy(&slots[n].stateBytes, &buf[12], 2);
+      if (len == sizeof(buf)) {
+        slots[n].isRaw = (bool)buf[14];
+        memcpy(&slots[n].rawLen, &buf[15], 2);
+      } else {
+        slots[n].isRaw = false;
+        slots[n].rawLen = 0;
+      }
       slots[n].protocol = (decode_type_t)prefs_.getUChar((key + "p").c_str(), decode_type_t::UNKNOWN);
       prefs_.getBytes((key + "st").c_str(), slots[n].state, kStateSizeMax);
+      if (slots[n].isRaw && slots[n].rawLen > 0) {
+        prefs_.getBytes((key + "rw").c_str(), slots[n].raw, slots[n].rawLen * sizeof(uint16_t));
+      }
       slots[n].label = prefs_.getString((key + "lb").c_str(), "");
     }
     slots[n].category = prefs_.getUChar((key + "c").c_str(), defaultCategoryForSlot(n));

@@ -190,10 +190,14 @@ WiFi設定コマンド(カテゴリ0x05):
 
 ### Lambda(`aws/lambda/index.js`)が処理するディレクティブ
 
-- `Alexa.Discovery.Discover`: shadowのreported.slots(ラベル付きスロット一覧)を`Alexa.SceneController`エンドポイントとして返す。生の学習コードはトグル式の状態を持たないため`PowerController`ではなく`SceneController`(Activate系)を採用。加えてエアコン用に`ThermostatController`+`PowerController`を持つ固定エンドポイント`ac-1`を追加
+- `Alexa.Discovery.Discover`: shadowのreported.slots(ラベル・カテゴリ付きスロット一覧)をカテゴリ別にエンドポイント化して返す
+  - `category=2`(照明): `Alexa.PowerController`エンドポイントとして公開。「〜つけて」「〜けして」の発話に対応
+  - それ以外(テレビ/その他): 従来通り`Alexa.SceneController`(Activate系)エンドポイントとして公開
+  - 加えてエアコン用に`ThermostatController`+`PowerController`を持つ固定エンドポイント`ac-1`を追加
 - `Alexa.SceneController.Activate`: shadow desiredに`{sendSlot: n}`を書き込み
-- `Alexa.ThermostatController.*` / `Alexa.PowerController.*`: shadow desiredに`{power, mode, temp, fan, swing}`(変更分のみ)を書き込み。Alexa標準の温度モードは`AUTO`/`COOL`/`HEAT`/`OFF`のみ対応(除湿・送風はAlexa標準インターフェースに無いため`AUTO`扱いにフォールバック)
-- `Alexa.ReportState`: shadowのreportedを読んで返す
+- `Alexa.PowerController.*`(`slot-n`宛て、照明用): `TurnOn`/`TurnOff`どちらが来てもshadow desiredに`{sendSlot: n}`を書き込むだけ。1ボタントグル式の照明リモコンを学習させている前提のため、ON/OFFで信号を出し分けられない(下記「既知の制約」参照)
+- `Alexa.PowerController.*`(`ac-1`宛て) / `Alexa.ThermostatController.*`: shadow desiredに`{power, mode, temp, fan, swing}`(変更分のみ)を書き込み。Alexa標準の温度モードは`AUTO`/`COOL`/`HEAT`/`OFF`のみ対応(除湿・送風はAlexa標準インターフェースに無いため`AUTO`扱いにフォールバック)
+- `Alexa.ReportState`: shadowのreportedを読んで返す(照明の`powerState`は`retrievable: false`のため対象外)
 
 デプロイ:
 ```
@@ -225,6 +229,7 @@ aws lambda update-function-code --function-name ir-remote-alexa-skill --zip-file
 - 上記の通りBLEとAlexa操作は同時に使えない(排他)
 - shadow deltaは変更フィールドのみ届く。ESP32側は未指定フィールドを現在値で埋めてから適用する(`IrController::getAcWireState()`)。ここを間違えると「温度だけ変えたら電源が切れる」といった事故になる
 - Alexa標準の`ThermostatController`は除湿(DRY)・送風(FAN)モードを持たないため、音声では冷房/暖房/自動/オフのみ操作可能(除湿等は`web/remote.html`側のみで操作)
+- 照明は1ボタントグル式のリモコンを学習させている前提。「つけて」「けして」どちらの発話でも同じ信号を送るだけなので、他の方法(壁スイッチ・付属リモコン本体等)で操作された場合はAlexa側が認識する状態と実際の点灯/消灯がズレる。ON/OFFボタンが分かれているリモコンなら2スロットに学習させ、Lambda側の`slot-n`対応付けをON用/OFF用に分けて`TurnOn`/`TurnOff`をそれぞれ別スロットに送るよう改修すれば状態ズレを解消できる
 - TLS証明書の有効期限検証にはNTP時刻同期が必須(ESP32はRTC電池が無くリセットで1970年に戻るため)。`AwsIotClient::ensureTimeSynced()`がWiFi接続後に自動でNTP同期してから接続を開始する
 - Cognitoユーザーは個人利用前提の単一アカウント。複数人で使う場合はユーザー追加が必要
 
@@ -235,5 +240,5 @@ ESP32-DEVKITC-VIE・SGN119はライブラリに正確な型番が無いため、
 
 ## 制限事項
 
-- IRremoteESP8266が対応していないプロトコル、または家電メーカー独自のraw波形のみの信号は「未知プロトコル」となり保存できない（現状raw波形保存には非対応、必要なら拡張可）
+- IRremoteESP8266が対応していないプロトコル(家電メーカー独自のraw波形のみの信号など)は「未知プロトコル」判定となるが、その場合は受信した生パルス列をraw波形としてそのまま学習スロットに保存し、送信時は`IRsend::sendRaw()`で再生する(`IrController::storeLastDecodeToSlot()`)。1スロットあたり最大400エントリまで(超過時のみ学習失敗)
 - エアコンなど長いデータ長・状態型プロトコル（Panasonic ACなど）は学習スロット側でも`state`配列を使い正しく保存・再送信できる。加えて`IRac`クラスによる汎用エアコン制御(ブランド選択+温度/モード/風量操作)も別途搭載済み（詳細は「汎用エアコン制御(IRac)」参照）

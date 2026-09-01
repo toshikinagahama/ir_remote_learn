@@ -99,23 +99,49 @@ async function handleDiscovery() {
   const reported = await getReportedShadow();
   const slots = Array.isArray(reported.slots) ? reported.slots : [];
 
-  const endpoints = slots.map((s) => ({
-    endpointId: `slot-${s.slot}`,
-    manufacturerName: 'ir_remote_learn',
-    friendlyName: s.label,
-    description: 'IR Remote Scene (ir_remote_learn)',
-    displayCategories: ['SCENE_TRIGGER'],
-    capabilities: [
-      { type: 'AlexaInterface', interface: 'Alexa', version: '3' },
-      {
-        type: 'AlexaInterface',
-        interface: 'Alexa.SceneController',
-        version: '3',
-        supportsDeactivation: false,
-        proactivelyReported: false,
-      },
-    ],
-  }));
+  const LIGHT_CATEGORY = 2;
+
+  const endpoints = slots.map((s) => {
+    if (s.category === LIGHT_CATEGORY) {
+      // 照明は1ボタントグル式のリモコンを学習させている前提のため、
+      // ON/OFFどちらの発話が来ても同じ信号(sendSlot)を送信する。
+      // 実際の点灯/消灯状態はESP32側で追跡できないため retrievable: false にし、
+      // 「今ついてる?」のようなReportState要求には応じない。
+      return {
+        endpointId: `slot-${s.slot}`,
+        manufacturerName: 'ir_remote_learn',
+        friendlyName: s.label,
+        description: 'IR Remote Light (ir_remote_learn)',
+        displayCategories: ['LIGHT'],
+        capabilities: [
+          { type: 'AlexaInterface', interface: 'Alexa', version: '3' },
+          {
+            type: 'AlexaInterface',
+            interface: 'Alexa.PowerController',
+            version: '3',
+            properties: { supported: [{ name: 'powerState' }], retrievable: false, proactivelyReported: false },
+          },
+        ],
+      };
+    }
+    return {
+      endpointId: `slot-${s.slot}`,
+      manufacturerName: 'ir_remote_learn',
+      friendlyName: s.label,
+      description: 'IR Remote Scene (ir_remote_learn)',
+      displayCategories: ['SCENE_TRIGGER'],
+      capabilities: [
+        { type: 'AlexaInterface', interface: 'Alexa', version: '3' },
+        {
+          type: 'AlexaInterface',
+          interface: 'Alexa.SceneController',
+          version: '3',
+          supportsDeactivation: false,
+          proactivelyReported: false,
+        },
+      ],
+    };
+  });
 
   endpoints.push({
     endpointId: 'ac-1',
@@ -176,6 +202,20 @@ async function handleSceneActivate(directive) {
 }
 
 async function handlePowerController(directive) {
+  const endpointId = directive.endpoint.endpointId;
+
+  if (endpointId.startsWith('slot-')) {
+    // 照明(トグル式)。TurnOn/TurnOffどちらでも同じ信号を送るだけで、
+    // retrievable: false のためcontext propertiesは返さない。
+    const slot = parseInt(endpointId.replace('slot-', ''), 10);
+    await updateDesired({ sendSlot: slot });
+    return alexaResponse(
+      { namespace: 'Alexa', name: 'Response' },
+      directive.endpoint,
+      {}
+    );
+  }
+
   const power = directive.header.name === 'TurnOn';
   await updateDesired({ power });
   const reported = await getReportedShadow();
