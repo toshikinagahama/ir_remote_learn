@@ -283,7 +283,7 @@ aws lambda update-function-code --function-name ir-remote-web-api --zip-file fil
 
 ### `web/remote-cloud.html`のホスティング
 
-S3(非公開、CloudFront経由のみ読み取り許可)+CloudFront(Origin Access Control、デフォルトドメインでHTTPS)で公開。
+S3(非公開、CloudFront経由のみ読み取り許可)+CloudFront(Origin Access Control、デフォルトドメインでHTTPS)で公開。公開URL: `https://d1apnmyp2indji.cloudfront.net/remote-cloud.html`(独自ドメイン無し、CloudFrontのデフォルトドメインをそのまま使用)。
 
 ```
 aws s3 cp web/remote-cloud.html s3://ir-remote-web-453393474681/remote-cloud.html --region ap-northeast-1 --content-type "text/html; charset=utf-8"
