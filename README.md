@@ -248,6 +248,50 @@ Alexa音声操作の実装中、「1回目のコマンドは効くが2回目以�
 - TLS証明書の有効期限検証にはNTP時刻同期が必須(ESP32はRTC電池が無くリセットで1970年に戻るため)。`AwsIotClient::ensureTimeSynced()`がWiFi接続後に自動でNTP同期してから接続を開始する
 - Cognitoユーザーは個人利用前提の単一アカウント。複数人で使う場合はユーザー追加が必要
 
+## クラウドモード中のWeb操作(`web/remote-cloud.html`)
+
+`web/remote.html`はBLE直結なので、クラウードモード中(BLEスタック停止中)は使えない。外出先などBLEが届かない場所からも操作したい場合は、こちらを使う。
+
+### 構成
+
+```
+ブラウザ(remote-cloud.html) → Lambda Function URL(aws/lambda-web/index.js) → AWS IoT Shadow更新
+                                                                              → ESP32(クラウードモード中)が既存の仕組みでdeltaを処理
+```
+
+ESP32側の変更は不要(既存のクラウードモードの仕組みをそのまま使う)。BLE版で行う「学習」「ラベル編集」「ACブランド変更・型番指定」「WiFi設定」はここでは非対応(shadowにその情報が無い、またはBLE経由でしか設定できないため)。送信専用リモコンとして、既存スロットの送信とAC(電源/温度/モード/送風/スイング)操作のみ行える。
+
+### Lambda(`aws/lambda-web/index.js`)
+
+`aws/lambda/index.js`(Alexa Smart Homeスキル用)とは別の、Web UI専用の薄いAPI。デプロイはTokyo(ap-northeast-1)、IAM Roleは`ir-remote-alexa-skill-lambda-role`を共用(shadow read/write権限のみ)。Function URL(認証タイプ`NONE`)で公開し、認証はLambda内部で`password`フィールドの一致チェックのみ行う簡易方式。
+
+| action | 用途 |
+|---|---|
+| `get_state` | reportedからスロット一覧・AC状態を取得 |
+| `send_slot` | `{slot: n}` → shadow desiredに`{sendSlot: "<n>-<timestamp>"}`を書き込み |
+| `set_ac` | `{power?, mode?, temp?, fan?, swing?}` → shadow desiredに`{...,cmdId: "<timestamp>"}`を書き込み |
+
+デプロイ:
+```
+cd aws/lambda-web
+npm install --production
+zip -r function.zip index.js node_modules package.json
+aws lambda update-function-code --function-name ir-remote-web-api --zip-file fileb://function.zip --region ap-northeast-1
+```
+
+**CORS注意点**: Lambda Function URL自体のCORS設定(`AllowOrigins`等)がレスポンスへCORSヘッダーを自動付与するため、Lambda関数コード側で`Access-Control-Allow-Origin`等を重複して返すと値が2つ入った不正なヘッダーになりブラウザに拒否される。CORSヘッダーはFunction URL側の設定に一本化している。
+
+### `web/remote-cloud.html`のホスティング
+
+S3(非公開、CloudFront経由のみ読み取り許可)+CloudFront(Origin Access Control、デフォルトドメインでHTTPS)で公開。
+
+```
+aws s3 cp web/remote-cloud.html s3://ir-remote-web-453393474681/remote-cloud.html --region ap-northeast-1 --content-type "text/html; charset=utf-8"
+aws cloudfront create-invalidation --distribution-id E1Y5T1F0L162IL --paths "/remote-cloud.html"
+```
+
+初回アクセス時にAPIパスワード(Lambda環境変数`WEB_API_PASSWORD`と同じ値)を入力すると、その端末のブラウザの`localStorage`に保存され次回以降は自動接続する。5秒おきにポーリングして状態を更新するため、Alexa等別経路での操作もある程度反映される。
+
 ## 回路図
 
 EasyEDA Proで回路図を作成済み（プロジェクト名: `ir_remote_learn`）。

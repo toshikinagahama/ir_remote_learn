@@ -7,3 +7,5 @@
 include/secrets.h
 aws/lambda/node_modules
 aws/lambda/function.zip
+aws/lambda-web/node_modules
+aws/lambda-web/function.zip

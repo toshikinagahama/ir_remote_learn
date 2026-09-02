@@ -1,0 +1,9 @@
+{
+  "name": "ir-remote-web-api",
+  "version": "1.0.0",
+  "description": "Web UI backend for ir_remote_learn (AWS IoT Shadow read/write over HTTPS, for use when the ESP32 is in cloud mode)",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-iot-data-plane": "^3.600.0"
+  }
+}

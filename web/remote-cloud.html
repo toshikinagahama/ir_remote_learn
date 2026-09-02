@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>IR Remote - Cloud Controller</title>
+<style>
+  :root {
+    --bg: #12141c;
+    --panel: #1c1f2b;
+    --panel-border: rgba(255,255,255,0.08);
+    --btn: #262a3a;
+    --btn-active: #343951;
+    --btn-empty: #1a1c26;
+    --accent: #5b8cff;
+    --accent-dim: #2f3f66;
+    --danger: #ef4444;
+    --ok: #22c55e;
+    --text: #f1f3f9;
+    --text-muted: #8b90a5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+  .dot.on { background: var(--ok); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    color: var(--text);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-primary {
+    background: var(--accent);
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    width: 100%;
+  }
+  .btn-secondary {
+    background: var(--btn);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .btn-danger {
+    background: var(--danger);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+
+  .tab-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .tab-btn {
+    background: var(--btn-empty);
+    color: var(--text-muted);
+    padding: 10px 4px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .tab-btn.active { background: var(--accent); color: var(--text); }
+
+  .remote-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .remote-btn {
+    background: var(--btn);
+    border-radius: 14px;
+    padding: 20px 10px;
+    min-height: 84px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+    position: relative;
+    transition: background 0.1s, transform 0.05s;
+  }
+  .remote-btn:active { transform: scale(0.96); background: var(--btn-active); }
+  .remote-btn.empty { background: var(--btn-empty); color: var(--text-muted); }
+  .remote-btn .slot-num {
+    position: absolute; top: 6px; left: 8px;
+    font-size: 10px; color: var(--text-muted);
+  }
+  .remote-btn .label {
+    font-size: 15px; font-weight: 600; line-height: 1.3;
+    word-break: break-word;
+  }
+  .empty-hint { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 0; }
+
+  /* エアコンパネル */
+  .ac-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; font-size: 14px; font-weight: 600;
+  }
+  select {
+    width: 100%;
+    background: var(--btn);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-family: inherit;
+  }
+  select:disabled { opacity: 0.4; }
+  .ac-temp-row {
+    display: flex; align-items: center; justify-content: center; gap: 20px;
+    margin-bottom: 14px;
+  }
+  .ac-temp-row button {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--btn); font-size: 20px; font-weight: 700;
+  }
+  .ac-temp-value { font-size: 28px; font-weight: 700; min-width: 72px; text-align: center; }
+  .ac-mode-row {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    margin-bottom: 12px;
+  }
+  .ac-mode-btn {
+    background: var(--btn);
+    padding: 10px 4px;
+    border-radius: 10px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .ac-mode-btn.active { background: var(--accent); font-weight: 700; }
+  .ac-sub-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .ac-sub-row select { margin-bottom: 0; flex: 1; }
+  .ac-swing-toggle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text-muted); white-space: nowrap;
+  }
+  .switch {
+    position: relative; width: 44px; height: 24px;
+    background: var(--btn); border-radius: 999px; cursor: pointer;
+    transition: background 0.15s; flex-shrink: 0;
+  }
+  .switch.on { background: var(--accent); }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    transition: left 0.15s;
+  }
+  .switch.on::after { left: 22px; }
+  .ac-power-status {
+    font-size: 11px; font-weight: 500; margin-left: 6px;
+    color: var(--text-muted);
+  }
+  .ac-power-status.on { color: var(--ok); }
+  .ac-stop-btn { width: 100%; margin-top: 4px; }
+
+  .log-panel { margin-top: 4px; }
+  .log-header {
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; font-size: 13px; color: var(--text-muted);
+  }
+  .log-box {
+    display: none;
+    margin-top: 10px;
+    max-height: 160px;
+    overflow-y: auto;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: #0c0e14;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .log-box.show { display: block; }
+  .log-line { padding: 1px 0; }
+  .pw-box input {
+    width: 100%;
+    background: var(--btn);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 8px;
+    font-family: inherit;
+  }
+  .hint { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>IR Remote (Cloud)</h1>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">未接続</span>
+    </div>
+  </header>
+
+  <div class="panel">
+    <p class="hint">ESP32が「クラウドモード」の時だけ動作する(BLEモード中は反応しない)。パスワードはこの端末のブラウザに保存される。</p>
+    <div class="pw-box">
+      <input type="password" id="pwInput" placeholder="APIパスワード">
+    </div>
+    <button class="btn-primary" id="btnConnect">接続</button>
+  </div>
+
+  <div class="panel">
+    <div class="tab-bar" id="tabBar">
+      <button class="tab-btn active" data-tab="ac">エアコン</button>
+      <button class="tab-btn" data-tab="tv">テレビ</button>
+      <button class="tab-btn" data-tab="light">照明</button>
+      <button class="tab-btn" data-tab="other">その他</button>
+    </div>
+
+    <div id="tabContentAc">
+      <div class="ac-header">
+        <span>エアコン（汎用） <span id="acPowerStatus" class="ac-power-status">停止中</span></span>
+        <div class="switch" id="acPowerSwitch"></div>
+      </div>
+      <div class="ac-temp-row">
+        <button class="btn-secondary" id="acTempDown">−</button>
+        <span class="ac-temp-value" id="acTempValue">25℃</span>
+        <button class="btn-secondary" id="acTempUp">＋</button>
+      </div>
+      <div class="ac-mode-row" id="acModeRow"></div>
+      <button class="btn-danger ac-stop-btn" id="acStopBtn">停止</button>
+      <div class="ac-sub-row">
+        <select id="acFanSelect">
+          <option value="0">送風: 自動</option>
+          <option value="1">送風: 弱め</option>
+          <option value="2">送風: 弱</option>
+          <option value="3">送風: 中</option>
+          <option value="4">送風: 強</option>
+          <option value="5">送風: 最大</option>
+          <option value="6">送風: 中強</option>
+        </select>
+        <div class="ac-swing-toggle">
+          <span>スイング</span>
+          <div class="switch" id="acSwingSwitch"></div>
+        </div>
+      </div>
+      <p class="hint">ブランド選択・型番指定・学習はBLE版(<code>remote.html</code>)でのみ操作可能。ここでは既存設定での電源/温度/モード操作のみ。</p>
+    </div>
+
+    <div id="tabContentSlots" style="display:none">
+      <div class="remote-grid" id="remoteGrid"></div>
+      <p class="empty-hint" id="emptyHint" style="display:none">このタブに登録済みのボタンが無い(名前設定・学習はBLE版で行う)</p>
+    </div>
+  </div>
+
+  <div class="panel log-panel">
+    <div class="log-header" id="logHeader">
+      <span>通信ログ ▾</span>
+      <span id="logClear">消去</span>
+    </div>
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+</div>
+
+<script>
+  // Lambda Function URL(認証: パスワードをbodyに含めてLambda側で照合)
+  const API_URL = 'https://yhdmsh6i65x6xmx3nzgeeiflzi0iuzcj.lambda-url.ap-northeast-1.on.aws/';
+  const NUM_SLOTS = 16;
+  const POLL_INTERVAL_MS = 5000;
+
+  const CATEGORY = { OTHER: 0, TV: 1, LIGHT: 2 };
+  const TAB_TO_CATEGORY = { tv: CATEGORY.TV, light: CATEGORY.LIGHT, other: CATEGORY.OTHER };
+  let activeTab = 'ac';
+
+  const AC_MODES = [
+    { v: 0, label: '自動' },
+    { v: 1, label: '冷房' },
+    { v: 2, label: '暖房' },
+    { v: 3, label: '除湿' },
+    { v: 4, label: '送風' },
+  ];
+
+  const acState = { power: false, mode: 0, temp: 25, fan: 0, swing: false };
+  let slots = Array.from({ length: NUM_SLOTS }, (_, i) => ({ n: i, valid: false, label: '', category: CATEGORY.OTHER }));
+
+  let password = localStorage.getItem('irRemoteCloudPassword') || '';
+  let connected = false;
+  let pollTimer = null;
+
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const btnConnect = document.getElementById('btnConnect');
+  const pwInput = document.getElementById('pwInput');
+  const remoteGrid = document.getElementById('remoteGrid');
+  const emptyHint = document.getElementById('emptyHint');
+  const logBox = document.getElementById('logBox');
+  const logHeader = document.getElementById('logHeader');
+
+  const tabBar = document.getElementById('tabBar');
+  const tabContentAc = document.getElementById('tabContentAc');
+  const tabContentSlots = document.getElementById('tabContentSlots');
+
+  const acPowerSwitch = document.getElementById('acPowerSwitch');
+  const acPowerStatus = document.getElementById('acPowerStatus');
+  const acStopBtn = document.getElementById('acStopBtn');
+  const acTempValue = document.getElementById('acTempValue');
+  const acTempDown = document.getElementById('acTempDown');
+  const acTempUp = document.getElementById('acTempUp');
+  const acModeRow = document.getElementById('acModeRow');
+  const acFanSelect = document.getElementById('acFanSelect');
+  const acSwingSwitch = document.getElementById('acSwingSwitch');
+
+  if (password) pwInput.value = password;
+
+  function log(msg) {
+    const now = new Date();
+    const t = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.textContent = `[${t}] ${msg}`;
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  logHeader.addEventListener('click', (e) => {
+    if (e.target.id === 'logClear') { logBox.innerHTML = ''; return; }
+    logBox.classList.toggle('show');
+  });
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  async function callApi(action, extra) {
+    const body = Object.assign({ password, action }, extra || {});
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.error || `HTTP ${res.status}`);
+    }
+    return json;
+  }
+
+  function setUIConnected(ok) {
+    connected = ok;
+    dot.classList.toggle('on', ok);
+    statusText.textContent = ok ? '接続中' : '未接続';
+    btnConnect.textContent = ok ? '切断' : '接続';
+  }
+
+  async function refreshState() {
+    try {
+      const data = await callApi('get_state');
+      slots.forEach((s) => { s.valid = false; s.label = ''; s.category = CATEGORY.OTHER; });
+      (data.slots || []).forEach((s) => {
+        if (s.slot >= 0 && s.slot < NUM_SLOTS) {
+          slots[s.slot] = { n: s.slot, valid: true, label: s.label || '', category: s.category != null ? s.category : CATEGORY.OTHER };
+        }
+      });
+      Object.assign(acState, data.ac || {});
+      renderGrid();
+      renderAc();
+      if (!connected) { setUIConnected(true); log('接続完了'); }
+    } catch (e) {
+      if (connected) log('状態取得エラー: ' + e.message);
+      setUIConnected(false);
+      throw e;
+    }
+  }
+
+  btnConnect.addEventListener('click', async () => {
+    if (connected) {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+      setUIConnected(false);
+      log('切断しました');
+      return;
+    }
+    password = pwInput.value;
+    if (!password) { log('パスワードを入力してください'); return; }
+    localStorage.setItem('irRemoteCloudPassword', password);
+    log('接続中...');
+    try {
+      await refreshState();
+      pollTimer = setInterval(() => refreshState().catch(() => {}), POLL_INTERVAL_MS);
+    } catch (e) {
+      log('接続エラー: ' + e.message);
+    }
+  });
+
+  function switchTab(tab) {
+    activeTab = tab;
+    Array.from(tabBar.children).forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    tabContentAc.style.display = tab === 'ac' ? 'block' : 'none';
+    tabContentSlots.style.display = tab === 'ac' ? 'none' : 'block';
+    if (tab !== 'ac') renderGrid();
+  }
+
+  Array.from(tabBar.children).forEach((btn) => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  function renderGrid() {
+    remoteGrid.innerHTML = '';
+    const targetCategory = TAB_TO_CATEGORY[activeTab];
+    if (targetCategory === undefined) return;
+    const visible = slots.filter((s) => s.category === targetCategory && s.valid);
+    emptyHint.style.display = visible.length === 0 ? 'block' : 'none';
+    visible.forEach((s) => {
+      const el = document.createElement('div');
+      el.className = 'remote-btn';
+      el.innerHTML = `
+        <span class="slot-num">${s.n}</span>
+        <span class="label">${escapeHtml(s.label || '(無名)')}</span>
+      `;
+      el.addEventListener('click', () => onSlotTap(s.n));
+      remoteGrid.appendChild(el);
+    });
+  }
+
+  async function onSlotTap(n) {
+    if (!connected) return;
+    try {
+      await callApi('send_slot', { slot: n });
+      log(`スロット${n}送信完了`);
+    } catch (e) {
+      log(`スロット${n}送信エラー: ` + e.message);
+    }
+  }
+
+  AC_MODES.forEach((m) => {
+    const el = document.createElement('div');
+    el.className = 'ac-mode-btn';
+    el.textContent = m.label;
+    el.dataset.mode = m.v;
+    el.addEventListener('click', () => {
+      if (!connected) return;
+      acState.mode = m.v;
+      renderAc();
+      sendAcState({ mode: m.v });
+    });
+    acModeRow.appendChild(el);
+  });
+
+  function renderAc() {
+    acPowerSwitch.classList.toggle('on', acState.power);
+    acPowerStatus.classList.toggle('on', acState.power);
+    acPowerStatus.textContent = acState.power ? '運転中' : '停止中';
+    acStopBtn.disabled = !connected || !acState.power;
+    acSwingSwitch.classList.toggle('on', acState.swing);
+    acTempValue.textContent = acState.temp + '℃';
+    acFanSelect.value = String(acState.fan);
+    Array.from(acModeRow.children).forEach((el) => {
+      el.classList.toggle('active', Number(el.dataset.mode) === acState.mode);
+    });
+  }
+
+  async function sendAcState(partial) {
+    try {
+      await callApi('set_ac', partial);
+      log('AC送信: ' + JSON.stringify(partial));
+    } catch (e) {
+      log('AC送信エラー: ' + e.message);
+    }
+  }
+
+  acPowerSwitch.addEventListener('click', () => {
+    if (!connected) return;
+    acState.power = !acState.power;
+    renderAc();
+    sendAcState({ power: acState.power });
+  });
+
+  acStopBtn.addEventListener('click', () => {
+    if (!connected) return;
+    acState.power = false;
+    renderAc();
+    sendAcState({ power: false });
+  });
+
+  acSwingSwitch.addEventListener('click', () => {
+    if (!connected) return;
+    acState.swing = !acState.swing;
+    renderAc();
+    sendAcState({ swing: acState.swing });
+  });
+
+  acTempDown.addEventListener('click', () => {
+    if (!connected) return;
+    acState.temp = Math.max(16, acState.temp - 1);
+    renderAc();
+    sendAcState({ temp: acState.temp });
+  });
+
+  acTempUp.addEventListener('click', () => {
+    if (!connected) return;
+    acState.temp = Math.min(30, acState.temp + 1);
+    renderAc();
+    sendAcState({ temp: acState.temp });
+  });
+
+  acFanSelect.addEventListener('change', () => {
+    if (!connected) return;
+    acState.fan = Number(acFanSelect.value);
+    sendAcState({ fan: acState.fan });
+  });
+
+  renderGrid();
+  renderAc();
+
+  if (password) {
+    log('保存済みパスワードで自動接続を試みます');
+    btnConnect.click();
+  }
+</script>
+</body>
+</html>
