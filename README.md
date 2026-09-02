@@ -194,9 +194,9 @@ WiFi設定コマンド(カテゴリ0x05):
   - `category=2`(照明): `Alexa.PowerController`エンドポイントとして公開。「〜つけて」「〜けして」の発話に対応
   - それ以外(テレビ/その他): 従来通り`Alexa.SceneController`(Activate系)エンドポイントとして公開
   - 加えてエアコン用に`ThermostatController`+`PowerController`を持つ固定エンドポイント`ac-1`を追加
-- `Alexa.SceneController.Activate`: shadow desiredに`{sendSlot: n}`を書き込み
-- `Alexa.PowerController.*`(`slot-n`宛て、照明用): `TurnOn`/`TurnOff`どちらが来てもshadow desiredに`{sendSlot: n}`を書き込むだけ。1ボタントグル式の照明リモコンを学習させている前提のため、ON/OFFで信号を出し分けられない(下記「既知の制約」参照)
-- `Alexa.PowerController.*`(`ac-1`宛て) / `Alexa.ThermostatController.*`: shadow desiredに`{power, mode, temp, fan, swing}`(変更分のみ)を書き込み。Alexa標準の温度モードは`AUTO`/`COOL`/`HEAT`/`OFF`のみ対応(除湿・送風はAlexa標準インターフェースに無いため`AUTO`扱いにフォールバック)
+- `Alexa.SceneController.Activate`: shadow desiredに`{sendSlot: "<n>-<timestamp>"}`を書き込み(タイムスタンプを混ぜる理由は下記「AWS IoT Shadowのdelta設計」参照)
+- `Alexa.PowerController.*`(`slot-n`宛て、照明用): `TurnOn`/`TurnOff`どちらが来てもshadow desiredに`{sendSlot: "<n>-<timestamp>"}`を書き込むだけ。1ボタントグル式の照明リモコンを学習させている前提のため、ON/OFFで信号を出し分けられない(下記「既知の制約」参照)
+- `Alexa.PowerController.*`(`ac-1`宛て) / `Alexa.ThermostatController.*`: shadow desiredに`{power, mode, temp, fan, swing, cmdId}`(変更分のみ+cmdId)を書き込み。Alexa標準の温度モードは`AUTO`/`COOL`/`HEAT`/`OFF`のみ対応(除湿・送風はAlexa標準インターフェースに無いため`AUTO`扱いにフォールバック)
 - `Alexa.ReportState`: shadowのreportedを読んで返す(照明の`powerState`は`retrievable: false`のため対象外)
 
 デプロイ:
@@ -223,6 +223,21 @@ aws lambda update-function-code --function-name ir-remote-alexa-skill --zip-file
 - クラウドモードからBLEモードに戻すには**本体の電源を入れ直す**(電源再投入)必要がある。ソフトウェア的な自動復帰は無い(起動時に常にBLEモードへ戻る設計のため)
 
 追加コマンド: `ENABLE_CLOUD_MODE` (`0x05 0x04`、payload無し)。切替直前に`mode,cloud_switching`をnotifyしてからBLEを停止する。
+
+### AWS IoT Shadowのdelta設計(ハマった落とし穴)
+
+Alexa音声操作の実装中、「1回目のコマンドは効くが2回目以降は無反応」「逆に同じ信号を無限に送り続けてしまう」という2つの重大な不具合を踏んだ。原因はAWS IoT Device Shadowの`delta`計算の仕様理解不足で、対策は`AwsIotClient::processDelta()`(`src/AwsIotClient.cpp`)に反映済み。同様の仕組みを拡張する際は必ずこの節を読むこと。
+
+**仕様**: `delta`(`$aws/things/.../shadow/update/delta`で配信される内容)は「`desired`と`reported`で**値が実際に異なる**フィールドのみ」を含む。フィールドのタイムスタンプが更新されただけで値が同じなら、そのフィールドはdeltaに現れない。
+
+- **問題1「2回目以降が無反応」**: 例えば`sendSlot: 5`を送って処理後、`reported.sendSlot`にも`5`をそのまま書き戻すと、次に同じスロット(`5`)をもう一度送ってもdesired/reportedが値として一致するためdeltaが生成されず、ESP32には何も配信されない
+  - 対策: `sendSlot`は`"<slot>-<timestamp>"`という文字列にして毎回値そのものを変える(`handleSceneActivate`/`handlePowerController`)。AC操作(`power`/`mode`/`temp`/`fan`/`swing`)は値自体を変えると意味が壊れるため、代わりに常に変化する`cmdId`(タイムスタンプ文字列)を追加フィールドとして混ぜ、ESP32側は`cmdId`の有無もAC処理のトリガー条件に含める
+- **問題2「無限に送り続ける」(実機で照明・エアコンが誤動作し続ける事故が発生)**:
+  - reportedを`null`のままにする(書き戻さない)と、desiredと永久に不一致のままになり、ポーリングのたびに再送信され続ける
+  - 複数フィールドを**2回に分けて**publishすると(例: `power`等を1回目のpublishで反映し、`cmdId`を2回目のpublishで反映)、1回目の直後(`cmdId`だけまだ古い)の中間状態をAWS側が観測してしまい、「一部だけ一致・一部だけ不一致」の新しいdeltaを生成してESP32へ再pushするレースコンディションで無限ループする
+  - 対策: 処理した値は必ず**そのままreportedへ書き戻し**desired==reportedにする。複数フィールドを更新する場合は**1回のUpdateThingShadowCommand(1回のpublish)にまとめる**(AWS側でアトミックに処理されるため中間状態が外部から観測されない)
+- **型の一致も必須**: `cmdId`をLambda側で文字列(`String(Date.now())`)として送るなら、ESP32側のreportedへの書き戻しでも同じ文字列型(ダブルクォート付き)で書く必要がある。型が食い違うと(片方が数値、片方が文字列)値として常に不一致とみなされ、問題2と同じ無限ループになる
+- **push配信の取りこぼし対策**: `WiFiClientSecure`+`PubSubClient`の組み合わせでは、TLSレコードが分割されて届いた際に受信を取りこぼすことが実機で確認された(`shadow/update/delta`のリアルタイムpushが届かない)。そのため`AwsIotClient::loop()`で5秒おきに`shadow/get`を再要求するポーリングをフォールバックとして常時併用している
 
 ### 既知の制約(Alexa連携)
 

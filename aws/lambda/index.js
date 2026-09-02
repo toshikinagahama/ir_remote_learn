@@ -192,7 +192,12 @@ async function handleDiscovery() {
 async function handleSceneActivate(directive) {
   const endpointId = directive.endpoint.endpointId; // "slot-<n>"
   const slot = parseInt(endpointId.replace('slot-', ''), 10);
-  await updateDesired({ sendSlot: slot });
+  // "<slot>-<timestamp>"形式にする。AWS IoT Shadowのdeltaは「値そのものが変化したフィールド」
+  // しか含まないため、素のslot番号だけだと同じスロットを連続送信した時にsendSlotフィールド自体が
+  // deltaに現れず(値として変化なしと判定され)ESP32に届かない。値に毎回変わる要素を混ぜることで
+  // 必ずdeltaに含まれるようにする(cmdIdを別フィールドに分離する案は、sendSlot自体の値が
+  // 変わらない限りdeltaにsendSlotキーが出てこず失敗した)
+  await updateDesired({ sendSlot: `${slot}-${Date.now()}` });
 
   return alexaResponse(
     { namespace: 'Alexa.SceneController', name: 'ActivationStarted' },
@@ -207,8 +212,9 @@ async function handlePowerController(directive) {
   if (endpointId.startsWith('slot-')) {
     // 照明(トグル式)。TurnOn/TurnOffどちらでも同じ信号を送るだけで、
     // retrievable: false のためcontext propertiesは返さない。
+    // "<slot>-<timestamp>"形式にする理由はhandleSceneActivateのコメント参照
     const slot = parseInt(endpointId.replace('slot-', ''), 10);
-    await updateDesired({ sendSlot: slot });
+    await updateDesired({ sendSlot: `${slot}-${Date.now()}` });
     return alexaResponse(
       { namespace: 'Alexa', name: 'Response' },
       directive.endpoint,
@@ -217,7 +223,11 @@ async function handlePowerController(directive) {
   }
 
   const power = directive.header.name === 'TurnOn';
-  await updateDesired({ power });
+  // cmdIdは常に変化する値を混ぜることで、前回と同じ状態(例: 既にON中にもう一度ON)を
+  // 指定した場合でもAWS IoT Shadowのdeltaが確実に生成されるようにするnonce
+  // (詳細はESP32側 AwsIotClient::processDelta のコメント参照)。
+  // 数値のままだとArduinoJson側で13桁の整数を精度落ちなく往復させるのが面倒なため文字列で送る
+  await updateDesired({ power, cmdId: String(Date.now()) });
   const reported = await getReportedShadow();
   const ac = { ...(reported.ac || reported), power };
   return alexaResponse(
@@ -252,6 +262,8 @@ async function handleThermostatController(directive) {
     }
   }
 
+  // cmdIdの理由はhandlePowerControllerのコメント参照
+  desired.cmdId = String(Date.now());
   await updateDesired(desired);
   const mergedAc = { ...currentAc, ...desired };
 

@@ -17,6 +17,9 @@ void AwsIotClient::begin() {
 
   mqttClient_.setServer(AWS_IOT_ENDPOINT, 8883);
   mqttClient_.setCallback(onMessageTrampoline);
+  // PubSubClientのデフォルト受信バッファ(256B)だとshadow/get/acceptedのフルドキュメント
+  // (desired+reported+metadata全部)を受信できず、それ以降のdelta受信も機能しなくなるため拡張
+  mqttClient_.setBufferSize(2048);
 }
 
 bool AwsIotClient::ensureTimeSynced() {
@@ -67,6 +70,24 @@ void AwsIotClient::loop() {
   ensureConnected();
   if (mqttClient_.connected()) {
     mqttClient_.loop();
+
+    // shadow/update/deltaのリアルタイムpushはWiFiClientSecure+PubSubClientの組み合わせで
+    // 稀に受信を取りこぼす(TLSレコード分割時にavailable()が検知し損ねる既知の問題)ため、
+    // push頼みにせず5秒おきにshadow/getを再要求してポーリングでも確実に拾えるようにする
+    static uint32_t lastPoll = 0;
+    if (millis() - lastPoll > 5000) {
+      lastPoll = millis();
+      mqttClient_.publish(kTopicGet, "");
+    }
+  }
+
+  // デバッグ用: 接続状態を10秒おきに出力(切断/未接続に気付かず無言のまま止まる問題の切り分け用)
+  static uint32_t lastStatusLog = 0;
+  if (millis() - lastStatusLog > 10000) {
+    lastStatusLog = millis();
+    Serial.printf("AWS IoT: status wifi=%d mqttState=%d mqttConnected=%d heap=%u\n",
+                  (int)wifiManager.isConnected(), mqttClient_.state(),
+                  (int)mqttClient_.connected(), ESP.getFreeHeap());
   }
 }
 
@@ -86,16 +107,34 @@ void AwsIotClient::processDelta(JsonObject state) {
   if (state.isNull() || state.size() == 0) return;
 
   if (state.containsKey("sendSlot")) {
-    uint8_t slot = (uint8_t)state["sendSlot"].as<int>();
+    // Lambda側は"<slot>-<timestamp>"形式の文字列で送ってくる。値そのものが毎回変わるので、
+    // AWS IoT Shadowのdelta計算(値が実際に変化したフィールドのみを含む)で確実にsendSlotが
+    // deltaに現れる。素の数値のままだと、同じslot番号を連続送信した時にsendSlotの値が
+    // 変化しないためdeltaに含まれず、2回目以降ESP32に全く届かなかった(実際に起きた不具合)
+    String raw = state["sendSlot"].as<String>();
+    int dashIdx = raw.indexOf('-');
+    uint8_t slot = (uint8_t)((dashIdx > 0) ? raw.substring(0, dashIdx).toInt() : raw.toInt());
     bool ok = irController.sendSlot(slot);
-    Serial.printf("AWS IoT: delta sendSlot=%u -> %s\n", slot, ok ? "OK" : "failed");
-    return;
+    Serial.printf("AWS IoT: delta sendSlot=%s (slot=%u) -> %s\n", raw.c_str(), slot, ok ? "OK" : "failed");
+    // reportedへ処理した値をそのまま書き戻し、desired==reportedにしてdeltaを解消する。
+    // 【注意】以前reportedをnullのままにする方式を試したが、それだとdesiredとreportedが
+    // 永久に不一致のままになり、5秒おきのポーリングのたびに再送信され続ける無限ループになった
+    // (実機で照明が誤動作し続ける事故が発生済み)。desired値をそのまま書き戻して一致させることが必須
+    if (mqttClient_.connected()) {
+      String body = "{\"state\":{\"reported\":{\"sendSlot\":\"" + raw + "\"}}}";
+      mqttClient_.publish(kTopicUpdate, body.c_str());
+    }
   }
 
   bool hasAcField = state.containsKey("power") || state.containsKey("mode") ||
                      state.containsKey("temp") || state.containsKey("fan") ||
                      state.containsKey("swing");
-  if (hasAcField) {
+  // cmdId(Lambda側が毎回付与するタイムスタンプ)もトリガー対象に含める。
+  // 「もう一度エアコンつけて」のように前回と全く同じ状態を指定した場合、power等の値自体は
+  // 変化しないためdeltaにpower等のキーが現れない(sendSlotで起きたのと同じ構造の問題)。
+  // cmdIdだけがdeltaに含まれるケースでも「現在の状態を再送信する」動作として処理する
+  bool hasCmdId = state.containsKey("cmdId");
+  if (hasAcField || hasCmdId) {
     // deltaは変更フィールドのみ含む。未指定分は現在値で埋める(欠落フィールドを誤ったデフォルトで
     // 上書きしないため。例: 温度だけ変更したのに電源がfalse扱いになる、を防ぐ)
     bool power; uint8_t mode, temp, fan; bool swing;
@@ -111,12 +150,32 @@ void AwsIotClient::processDelta(JsonObject state) {
                   power, mode, temp, fan, swing);
     bool ok = irController.acApplyState(power, mode, temp, fan, swing);
     Serial.printf("AWS IoT: acApplyState -> %s\n", ok ? "OK" : "failed");
-    publishAcState();  // 実行結果をreportedへ反映(shadowの信頼性を保つ)
+
+    // power/mode/temp/fan/swingとcmdIdを1回のpublishでまとめてreportedへ反映する。
+    // 【注意】以前は publishAcState() とcmdIdのecho-backを別々の2回のpublishに分けていたが、
+    // それだと1回目のpublish直後(cmdIdはまだ古いまま)の中間状態をAWS側が観測し、
+    // 「power等は一致したがcmdIdはまだ不一致」という新しいdeltaを生成してESP32へ再pushして
+    // しまうレースコンディションで無限ループが発生した(実機で複数回発生した重大な事故)。
+    // 1回のUpdateThingShadowCommandはAWS側でアトミックに処理されるため、この中間状態が
+    // 外部から観測されることがなくなる
+    if (mqttClient_.connected()) {
+      String acJson = irController.acShadowJson();  // "{...}"
+      if (hasCmdId) {
+        String cmdIdStr = state["cmdId"].as<String>();
+        acJson = acJson.substring(0, acJson.length() - 1) + ",\"cmdId\":\"" + cmdIdStr + "\"}";
+      }
+      String body = "{\"state\":{\"reported\":" + acJson + "}}";
+      mqttClient_.publish(kTopicUpdate, body.c_str());
+    }
   }
 }
 
 void AwsIotClient::onMessage(char *topic, uint8_t *payload, unsigned int length) {
-  StaticJsonDocument<384> doc;
+  Serial.printf("AWS IoT: onMessage topic=%s length=%u\n", topic, length);
+
+  // shadow/get/acceptedはdesired+reported+metadata全部を含むフルドキュメントで384Bを超えるため
+  // (実際に384BだとNoMemoryでパース失敗していた)、AwsIotTaskのスタック(16KB)に余裕を見て2048Bに拡張
+  StaticJsonDocument<2048> doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) {
     Serial.printf("AWS IoT: shadow message JSON parse error: %s\n", err.c_str());
